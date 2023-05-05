@@ -14,11 +14,10 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"testing"
 	"time"
 
-	"github.com/hirochachacha/go-smb2"
-
-	"testing"
+	"github.com/cloudsoda/go-smb2"
 )
 
 func join(ss ...string) string {

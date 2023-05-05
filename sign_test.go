@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/hex"
-
-	"github.com/hirochachacha/go-smb2/internal/crypto/cmac"
-
-	. "github.com/hirochachacha/go-smb2/internal/smb2"
-
 	"testing"
+
+	"github.com/cloudsoda/go-smb2/internal/crypto/cmac"
+	. "github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
 func TestSign(t *testing.T) {

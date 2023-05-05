@@ -6,10 +6,9 @@ import (
 	"crypto/md5"
 	"crypto/rc4"
 	"encoding/hex"
-
 	"testing"
 
-	"github.com/hirochachacha/go-smb2/internal/utf16le"
+	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
 
 func TestNtowfv2(t *testing.T) {
