@@ -14,7 +14,7 @@ import (
 
 	"github.com/cloudsoda/go-smb2/internal/crypto/ccm"
 	"github.com/cloudsoda/go-smb2/internal/crypto/cmac"
-	. "github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/internal/erref"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
@@ -55,8 +55,8 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 
 	p := PacketCodec(pkt)
 
-	if NtStatus(p.Status()) != STATUS_MORE_PROCESSING_REQUIRED {
-		return nil, &InvalidResponseError{fmt.Sprintf("expected status: %v, got %v", STATUS_MORE_PROCESSING_REQUIRED, NtStatus(p.Status()))}
+	if erref.NtStatus(p.Status()) != erref.STATUS_MORE_PROCESSING_REQUIRED {
+		return nil, &InvalidResponseError{fmt.Sprintf("expected status: %v, got %v", erref.STATUS_MORE_PROCESSING_REQUIRED, erref.NtStatus(p.Status()))}
 	}
 
 	res, err := accept(SMB2_SESSION_SETUP, pkt)
@@ -239,7 +239,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 		return nil, &InvalidResponseError{"broken session setup response format"}
 	}
 
-	if NtStatus(PacketCodec(pkt).Status()) != STATUS_SUCCESS {
+	if erref.NtStatus(PacketCodec(pkt).Status()) != erref.STATUS_SUCCESS {
 		return nil, &InvalidResponseError{"broken session setup response format"}
 	}
 

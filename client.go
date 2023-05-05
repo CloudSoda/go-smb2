@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/msrpc"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
 )
@@ -173,7 +173,7 @@ func (c *Session) ListSharenames() ([]string, error) {
 
 	output, err = f.ioctl(reqReq)
 	if err != nil {
-		if rerr, ok := err.(*ResponseError); ok && NtStatus(rerr.Code) == STATUS_BUFFER_OVERFLOW {
+		if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_BUFFER_OVERFLOW {
 			buf := make([]byte, 4280)
 
 			rlen := 4280 - len(output)
@@ -951,7 +951,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 
 		res, err := fs.sendRecv(SMB2_CREATE, req)
 		if err != nil {
-			if rerr, ok := err.(*ResponseError); ok && NtStatus(rerr.Code) == STATUS_STOPPED_ON_SYMLINK {
+			if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_STOPPED_ON_SYMLINK {
 				if len(rerr.data) > 0 {
 					name, err = evalSymlinkError(req.Name, rerr.data[0])
 					if err != nil {
@@ -1112,7 +1112,7 @@ func (f *File) Read(b []byte) (n int, err error) {
 		}
 	}
 	if err != nil {
-		if err, ok := err.(*ResponseError); ok && NtStatus(err.Code) == STATUS_END_OF_FILE {
+		if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE {
 			return n, io.EOF
 		}
 		return n, &os.PathError{Op: "read", Path: f.name, Err: err}
@@ -1129,7 +1129,7 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 
 	n, err = f.readAt(b, off)
 	if err != nil {
-		if err, ok := err.(*ResponseError); ok && NtStatus(err.Code) == STATUS_END_OF_FILE {
+		if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE {
 			return n, io.EOF
 		}
 		return n, &os.PathError{Op: "read", Path: f.name, Err: err}
@@ -1193,7 +1193,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 		case len(b)-n <= maxReadSize:
 			bs, isEOF, err := f.readAtChunk(len(b)-n, int64(n)+off)
 			if err != nil {
-				if err, ok := err.(*ResponseError); ok && NtStatus(err.Code) == STATUS_END_OF_FILE && n != 0 {
+				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
 					return n, nil
 				}
 				return 0, err
@@ -1207,7 +1207,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 		default:
 			bs, isEOF, err := f.readAtChunk(maxReadSize, int64(n)+off)
 			if err != nil {
-				if err, ok := err.(*ResponseError); ok && NtStatus(err.Code) == STATUS_END_OF_FILE && n != 0 {
+				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
 					return n, nil
 				}
 				return 0, err
@@ -1277,7 +1277,7 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 				f.dirents = append(f.dirents, dirents...)
 			}
 			if err != nil {
-				if err, ok := err.(*ResponseError); ok && NtStatus(err.Code) == STATUS_NO_MORE_FILES {
+				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_NO_MORE_FILES {
 					f.noMoreFiles = true
 					break
 				}
@@ -1731,7 +1731,7 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 
 	output, err := f.ioctl(req)
 	if err != nil {
-		if rerr, ok := err.(*ResponseError); ok && NtStatus(rerr.Code) == STATUS_NOT_SUPPORTED {
+		if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_NOT_SUPPORTED {
 			return false, -1, nil
 		}
 

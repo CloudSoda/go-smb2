@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/internal/erref"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
@@ -600,40 +600,40 @@ func accept(cmd uint16, pkt []byte) (res []byte, err error) {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected command: %v, got %v", cmd, command)}
 	}
 
-	status := NtStatus(p.Status())
+	status := erref.NtStatus(p.Status())
 
 	switch status {
-	case STATUS_SUCCESS:
+	case erref.STATUS_SUCCESS:
 		return p.Data(), nil
-	case STATUS_OBJECT_NAME_COLLISION:
+	case erref.STATUS_OBJECT_NAME_COLLISION:
 		return nil, os.ErrExist
-	case STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND:
+	case erref.STATUS_OBJECT_NAME_NOT_FOUND, erref.STATUS_OBJECT_PATH_NOT_FOUND:
 		return nil, os.ErrNotExist
-	case STATUS_ACCESS_DENIED, STATUS_CANNOT_DELETE:
+	case erref.STATUS_ACCESS_DENIED, erref.STATUS_CANNOT_DELETE:
 		return nil, os.ErrPermission
 	}
 
 	switch cmd {
 	case SMB2_SESSION_SETUP:
-		if status == STATUS_MORE_PROCESSING_REQUIRED {
+		if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
 			return p.Data(), nil
 		}
 	case SMB2_QUERY_INFO:
-		if status == STATUS_BUFFER_OVERFLOW {
+		if status == erref.STATUS_BUFFER_OVERFLOW {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
 	case SMB2_IOCTL:
-		if status == STATUS_BUFFER_OVERFLOW {
+		if status == erref.STATUS_BUFFER_OVERFLOW {
 			if !IoctlResponseDecoder(p.Data()).IsInvalid() {
 				return p.Data(), &ResponseError{Code: uint32(status)}
 			}
 		}
 	case SMB2_READ:
-		if status == STATUS_BUFFER_OVERFLOW {
+		if status == erref.STATUS_BUFFER_OVERFLOW {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
 	case SMB2_CHANGE_NOTIFY:
-		if status == STATUS_NOTIFY_ENUM_DIR {
+		if status == erref.STATUS_NOTIFY_ENUM_DIR {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
 	}
@@ -742,7 +742,7 @@ func (conn *conn) tryHandle(pkt []byte, e error) error {
 		rr.err = e
 
 		close(rr.recv)
-	case NtStatus(p.Status()) == STATUS_PENDING:
+	case erref.NtStatus(p.Status()) == erref.STATUS_PENDING:
 		rr.asyncId = p.AsyncId()
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
 		conn.outstandingRequests.set(msgId, rr)
