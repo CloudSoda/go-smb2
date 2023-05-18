@@ -3,7 +3,7 @@ jobs:
   test_linux:
     strategy:
       matrix:
-        go: [1.20]
+        go: [1.20.2]
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/setup-go@v3
@@ -33,7 +33,7 @@ jobs:
   test_windows:
     strategy:
       matrix:
-        go: [1.20]
+        go: [1.20.2]
     runs-on: windows-2022
     steps:
     - uses: actions/setup-go@v3
