@@ -18,7 +18,7 @@ jobs:
         (echo Smbpasswd12345; echo Smbpasswd12345) | sudo smbpasswd -a -s smbuser
         sudo cp ./.github/smb.conf /etc/samba/smb.conf
         sudo smbd
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: |
           ~/go/pkg/mod
@@ -45,7 +45,7 @@ jobs:
         net user smbuser Smbpasswd12345 /add
         net share tmp="C:\tmp" /GRANT:smbuser,full
         net share tmp2="C:\tmp" /GRANT:smbuser,read
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: |
           ~/go/pkg/mod
