@@ -17,7 +17,7 @@ Installation
 Documentation
 -------------
 
-http://godoc.org/github.com/cloudsoda/go-smb2
+https://pkg.go.dev/github.com/cloudsoda/go-smb2
 
 Examples
 --------
@@ -72,7 +72,6 @@ package main
 
 import (
 	"io"
-	"io/ioutil"
 	"net"
 
 	"github.com/cloudsoda/go-smb2"
@@ -121,7 +120,7 @@ func main() {
 		panic(err)
 	}
 
-	bs, err := ioutil.ReadAll(f)
+	bs, err := io.ReadAll(f)
 	if err != nil {
 		panic(err)
 	}
