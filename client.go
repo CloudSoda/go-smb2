@@ -1419,13 +1419,19 @@ func (f *File) Statfs() (FileFsInfo, error) {
 }
 
 type FileFsInfo interface {
+	// The number of bytes in a single block on the volume. A block is the smallest allocation unit on the volume.
 	BlockSize() uint64
+	// Number of sectors in each block.
 	FragmentSize() uint64
+	// Total number of blocks on the volume that are available to the user.
 	TotalBlockCount() uint64
+	// Total number of blocks on the volume.
 	FreeBlockCount() uint64
+	// Total number of free blocks on the volume that are available to the user.
 	AvailableBlockCount() uint64
 }
 
+// Definitions: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/63768db7-9012-4209-8cca-00781e7322f5
 type fileFsFullSizeInformation struct {
 	TotalAllocationUnits           int64
 	CallerAvailableAllocationUnits int64
@@ -1435,7 +1441,7 @@ type fileFsFullSizeInformation struct {
 }
 
 func (fi *fileFsFullSizeInformation) BlockSize() uint64 {
-	return uint64(fi.BytesPerSector)
+	return uint64(fi.BytesPerSector) * uint64(fi.SectorsPerAllocationUnit)
 }
 
 func (fi *fileFsFullSizeInformation) FragmentSize() uint64 {

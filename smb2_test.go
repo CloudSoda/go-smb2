@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"reflect"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cloudsoda/go-smb2"
+	"github.com/stretchr/testify/require"
 )
 
 func join(ss ...string) string {
@@ -189,9 +189,8 @@ func TestReaddir(t *testing.T) {
 	}
 
 	fi2, err = d2.Readdir(1)
-	if err != io.EOF {
-		t.Error("unexpected error: ", err)
-	}
+	require.Equal(t, io.EOF, err)
+	require.Empty(t, fi2)
 }
 
 func TestFile(t *testing.T) {
@@ -355,7 +354,7 @@ func TestSymlink(t *testing.T) {
 
 		f, err = fs.Open(testDir + `\linkToTestFile`)
 		if err == nil { // if it supports follow-symlink
-			bs, err := ioutil.ReadAll(f)
+			bs, err := io.ReadAll(f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -484,7 +483,7 @@ func TestRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	bs, err := ioutil.ReadAll(f)
+	bs, err := io.ReadAll(f)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package smb2_test
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 
 	"github.com/cloudsoda/go-smb2"
@@ -53,7 +52,7 @@ func Example() {
 		panic(err)
 	}
 
-	bs, err := ioutil.ReadAll(f)
+	bs, err := io.ReadAll(f)
 	if err != nil {
 		panic(err)
 	}
