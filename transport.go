@@ -30,7 +30,7 @@ func direct(tcpConn net.Conn) transport {
 
 func (t *directTCP) Write(p []byte) (n int, err error) {
 	if len(p) > maxDirectTCPSize {
-		return -1, errors.New("max transport size exceeds")
+		return 0, errors.New("max transport size exceeds")
 	}
 
 	bs := t.sb[:]
@@ -39,12 +39,12 @@ func (t *directTCP) Write(p []byte) (n int, err error) {
 
 	_, err = t.conn.Write(bs)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	n, err = t.conn.Write(p)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	return n + 4, nil
@@ -55,11 +55,11 @@ func (t *directTCP) ReadSize() (size int, err error) {
 
 	_, err = io.ReadFull(t.conn, bs)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	if bs[0] != 0 {
-		return -1, errors.New("invalid transport format")
+		return 0, errors.New("invalid transport format")
 	}
 
 	return int(be.Uint32(bs)), nil
@@ -68,7 +68,7 @@ func (t *directTCP) ReadSize() (size int, err error) {
 func (t *directTCP) Read(p []byte) (n int, err error) {
 	n, err = io.ReadFull(t.conn, p)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	return n, err
