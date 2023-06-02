@@ -4,6 +4,7 @@ package smb2
 // SMB2 Packet Header
 //
 
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/fb188936-5050-48d3-b350-dc43059638a4
 type PacketHeader struct {
 	CreditCharge          uint16
 	ChannelSequence       uint16

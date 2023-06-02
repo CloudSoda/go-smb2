@@ -191,7 +191,7 @@ func (c *SymbolicLinkErrorResponse) Encode(p []byte) {
 	plen := utf16le.EncodeString(p[24+slen:], c.PrintName)
 
 	le.PutUint32(p[:4], uint32(len(p)-4)) // SymLinkLength
-	le.PutUint32(p[4:8], 0x4c4d5953)
+	le.PutUint32(p[4:8], 0x4c4d5953)      // in ASCII: LMYS (SYML)
 	le.PutUint32(p[8:12], IO_REPARSE_TAG_SYMLINK)
 	le.PutUint16(p[14:16], c.UnparsedPathLength)
 	le.PutUint32(p[24:28], c.Flags)
@@ -634,6 +634,7 @@ func (r LogoffResponseDecoder) StructureSize() uint16 {
 // SMB2 TREE_CONNECT Response
 //
 
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/dd34e26c-a75e-47fa-aab2-6efc27502e96
 type TreeConnectResponse struct {
 	PacketHeader
 
