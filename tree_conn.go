@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
+	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
 
 type treeConn struct {
@@ -18,10 +19,11 @@ type treeConn struct {
 	// maximalAccess uint32
 }
 
-func treeConnect(s *session, path string, flags uint16, ctx context.Context) (*treeConn, error) {
+func treeConnect(s *session, path string, flags uint16, mc utf16le.MapChars, ctx context.Context) (*treeConn, error) {
 	req := &TreeConnectRequest{
-		Flags: flags,
-		Path:  path,
+		Flags:   flags,
+		Path:    path,
+		Mapping: mc,
 	}
 
 	req.CreditCharge = 1

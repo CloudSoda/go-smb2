@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEncodingToSFM(t *testing.T) {
+func TestEncodeSFM(t *testing.T) {
 	t.Parallel()
 
 	/**
@@ -81,8 +81,8 @@ func TestEncodingToSFM(t *testing.T) {
 
 	for _, td := range testData {
 		t.Run(td.scenario, func(t *testing.T) {
-			t.Run("EncodeStringToSFMBytes", func(t *testing.T) {
-				encoded := EncodeStringToSFMBytes(td.input)
+			t.Run("Encode", func(t *testing.T) {
+				encoded := Encode(td.input, MapCharsSFM)
 				u16s := make([]uint16, len(encoded)/2)
 				for i := range u16s {
 					u16s[i] = le.Uint16(encoded[2*i : 2*i+2])
@@ -92,9 +92,9 @@ func TestEncodingToSFM(t *testing.T) {
 				require.Equal(t, td.expectedHex, hex.EncodeToString([]byte(str)))
 			})
 
-			t.Run("EncodeStringSFM", func(t *testing.T) {
+			t.Run("EncodeSlice", func(t *testing.T) {
 				encoded := make([]byte, EncodedStringLen(td.input))
-				written := EncodeStringSFM(encoded, td.input)
+				written := EncodeSlice(encoded, td.input, MapCharsSFM)
 				require.NotZero(t, written)
 				u16s := make([]uint16, len(encoded)/2)
 				for i := range u16s {
@@ -118,11 +118,39 @@ func TestSFMRoundtrip(t *testing.T) {
 		for i := 1; i <= 0x1F; i++ {
 			reservedChars = append(reservedChars, rune(i))
 		}
+
 		for _, c := range reservedChars {
-			in := "a" + string(c) + ".txt"
-			encoded := EncodeStringToSFMBytes(in)
-			decoded := DecodeSFMToString(encoded)
-			require.Equal(t, in, decoded)
+			t.Run("char "+string(c), func(t *testing.T) {
+				t.Run("single path component", func(t *testing.T) {
+					in := "a" + string(c) + ".txt"
+					encoded := Encode(in, MapCharsSFM)
+					decoded := Decode(encoded, MapCharsSFM)
+					require.Equal(t, in, decoded)
+				})
+
+				t.Run("multiple path components", func(t *testing.T) {
+					t.Run("no outer slashes", func(t *testing.T) {
+						in := `dir` + string(c) + `dir\foo\a` + string(c) + `.txt`
+						encoded := Encode(in, MapCharsSFM)
+						decoded := Decode(encoded, MapCharsSFM)
+						require.Equal(t, in, decoded)
+					})
+
+					t.Run("has backslash prefix", func(t *testing.T) {
+						in := `\dir` + string(c) + `dir\foo\a` + string(c) + `.txt`
+						encoded := Encode(in, MapCharsSFM)
+						decoded := Decode(encoded, MapCharsSFM)
+						require.Equal(t, in, decoded)
+					})
+
+					t.Run("has backslash suffix", func(t *testing.T) {
+						in := `dir` + string(c) + `dir\foo\a` + string(c) + `.txt\`
+						encoded := Encode(in, MapCharsSFM)
+						decoded := Decode(encoded, MapCharsSFM)
+						require.Equal(t, in, decoded)
+					})
+				})
+			})
 		}
 	})
 
@@ -130,8 +158,8 @@ func TestSFMRoundtrip(t *testing.T) {
 		t.Parallel()
 
 		in := "file."
-		encoded := EncodeStringToSFMBytes(in)
-		decoded := DecodeSFMToString(encoded)
+		encoded := Encode(in, MapCharsSFM)
+		decoded := Decode(encoded, MapCharsSFM)
 		require.Equal(t, in, decoded)
 	})
 
@@ -139,16 +167,16 @@ func TestSFMRoundtrip(t *testing.T) {
 		t.Parallel()
 
 		in := "file "
-		encoded := EncodeStringToSFMBytes(in)
-		decoded := DecodeSFMToString(encoded)
+		encoded := Encode(in, MapCharsSFM)
+		decoded := Decode(encoded, MapCharsSFM)
 		require.Equal(t, in, decoded)
 	})
 
 	t.Run("empty string", func(t *testing.T) {
 		t.Parallel()
 
-		encoded := EncodeStringToSFMBytes("")
-		decoded := DecodeSFMToString(encoded)
+		encoded := Encode("", MapCharsSFM)
+		decoded := Decode(encoded, MapCharsSFM)
 		require.Empty(t, decoded)
 	})
 }
@@ -156,7 +184,7 @@ func TestSFMRoundtrip(t *testing.T) {
 func TestSFURoundtrip(t *testing.T) {
 	t.Parallel()
 
-	t.Run("using EncodeStringToSFUBytes", func(t *testing.T) {
+	t.Run("using Encode", func(t *testing.T) {
 		t.Parallel()
 
 		t.Run("reserved characters", func(t *testing.T) {
@@ -165,8 +193,8 @@ func TestSFURoundtrip(t *testing.T) {
 			reservedChars := []string{`"`, `*`, `:`, `<`, `>`, `?`, `|`, ` `, `.`}
 			for _, c := range reservedChars {
 				in := "a" + c + ".txt"
-				encoded := EncodeStringToSFUBytes(in)
-				decoded := DecodeSFUToString(encoded)
+				encoded := Encode(in, MapCharsSFU)
+				decoded := Decode(encoded, MapCharsSFU)
 				require.Equal(t, in, decoded)
 			}
 		})
@@ -175,21 +203,21 @@ func TestSFURoundtrip(t *testing.T) {
 			t.Parallel()
 
 			in := "terrible.trouble.odf"
-			encoded := EncodeStringToSFUBytes(in)
-			decoded := DecodeSFUToString(encoded)
+			encoded := Encode(in, MapCharsSFU)
+			decoded := Decode(encoded, MapCharsSFU)
 			require.Equal(t, in, decoded)
 		})
 
 		t.Run("empty string", func(t *testing.T) {
 			t.Parallel()
 
-			encoded := EncodeStringToSFUBytes("")
-			decoded := DecodeSFUToString(encoded)
+			encoded := Encode("", MapCharsSFU)
+			decoded := Decode(encoded, MapCharsSFU)
 			require.Empty(t, decoded)
 		})
 	})
 
-	t.Run("using EncodeStringSFU", func(t *testing.T) {
+	t.Run("using EncodeSlice", func(t *testing.T) {
 		t.Parallel()
 
 		t.Run("reserved characters", func(t *testing.T) {
@@ -200,9 +228,9 @@ func TestSFURoundtrip(t *testing.T) {
 				in := "a" + c + ".txt"
 				encodedLen := EncodedStringLen(in)
 				buf := make([]byte, encodedLen)
-				written := EncodeStringSFU(buf, in)
+				written := EncodeSlice(buf, in, MapCharsSFU)
 				require.EqualValues(t, encodedLen, written)
-				decoded := DecodeSFUToString(buf)
+				decoded := Decode(buf, MapCharsSFU)
 				require.Equal(t, in, decoded)
 			}
 		})
@@ -213,9 +241,9 @@ func TestSFURoundtrip(t *testing.T) {
 			in := "going.to.dinner.mp3"
 			encodedLen := EncodedStringLen(in)
 			buf := make([]byte, encodedLen)
-			written := EncodeStringSFU(buf, in)
+			written := EncodeSlice(buf, in, MapCharsSFU)
 			require.EqualValues(t, encodedLen, written)
-			decoded := DecodeSFUToString(buf)
+			decoded := Decode(buf, MapCharsSFU)
 			require.Equal(t, in, decoded)
 		})
 	})

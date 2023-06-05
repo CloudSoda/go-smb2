@@ -43,6 +43,7 @@ type SymbolicLinkReparseDataBuffer struct {
 	Flags          uint32
 	SubstituteName string
 	PrintName      string
+	Mapping        utf16le.MapChars
 }
 
 func (c *SymbolicLinkReparseDataBuffer) Size() int {
@@ -50,8 +51,8 @@ func (c *SymbolicLinkReparseDataBuffer) Size() int {
 }
 
 func (c *SymbolicLinkReparseDataBuffer) Encode(p []byte) {
-	slen := utf16le.EncodeString(p[20:], c.SubstituteName)
-	plen := utf16le.EncodeString(p[20+slen:], c.PrintName)
+	slen := utf16le.EncodeSlice(p[20:], c.SubstituteName, c.Mapping)
+	plen := utf16le.EncodeSlice(p[20+slen:], c.PrintName, c.Mapping)
 
 	le.PutUint32(p[:4], IO_REPARSE_TAG_SYMLINK)
 	le.PutUint16(p[4:6], uint16(len(p)-8)) // ReparseDataLength
@@ -126,16 +127,16 @@ func (c SymbolicLinkReparseDataBufferDecoder) PathBuffer() []byte {
 	return c[20:]
 }
 
-func (c SymbolicLinkReparseDataBufferDecoder) SubstituteName() string {
+func (c SymbolicLinkReparseDataBufferDecoder) SubstituteName(mc utf16le.MapChars) string {
 	off := c.SubstituteNameOffset()
 	len := c.SubstituteNameLength()
-	return utf16le.DecodeToString(c.PathBuffer()[off : off+len])
+	return utf16le.Decode(c.PathBuffer()[off:off+len], mc)
 }
 
-func (c SymbolicLinkReparseDataBufferDecoder) PrintName() string {
+func (c SymbolicLinkReparseDataBufferDecoder) PrintName(mc utf16le.MapChars) string {
 	off := c.PrintNameOffset()
 	len := c.PrintNameLength()
-	return utf16le.DecodeToString(c.PathBuffer()[off : off+len])
+	return utf16le.Decode(c.PathBuffer()[off:off+len], mc)
 }
 
 type SrvRequestResumeKeyResponseDecoder []byte
@@ -346,14 +347,15 @@ func (c FileDirectoryInformationDecoder) FileNameLength() uint32 {
 	return le.Uint32(c[60:64])
 }
 
-func (c FileDirectoryInformationDecoder) FileName() string {
-	return utf16le.DecodeToString(c[64 : 64+c.FileNameLength()])
+func (c FileDirectoryInformationDecoder) FileName(mc utf16le.MapChars) string {
+	return utf16le.Decode(c[64:64+c.FileNameLength()], mc)
 }
 
 type FileRenameInformationType2Encoder struct {
 	ReplaceIfExists uint8
 	RootDirectory   uint64
 	FileName        string
+	Mapping         utf16le.MapChars
 }
 
 func (c *FileRenameInformationType2Encoder) Size() int {
@@ -361,7 +363,7 @@ func (c *FileRenameInformationType2Encoder) Size() int {
 }
 
 func (c *FileRenameInformationType2Encoder) Encode(p []byte) {
-	flen := utf16le.EncodeString(p[20:], c.FileName)
+	flen := utf16le.EncodeSlice(p[20:], c.FileName, c.Mapping)
 
 	p[0] = c.ReplaceIfExists
 	le.PutUint64(p[8:16], c.RootDirectory)
@@ -372,6 +374,7 @@ type FileLinkInformationType2Encoder struct {
 	ReplaceIfExists uint8
 	RootDirectory   uint64
 	FileName        string
+	Mapping         utf16le.MapChars
 }
 
 func (c *FileLinkInformationType2Encoder) Size() int {
@@ -379,7 +382,7 @@ func (c *FileLinkInformationType2Encoder) Size() int {
 }
 
 func (c *FileLinkInformationType2Encoder) Encode(p []byte) {
-	flen := utf16le.EncodeString(p[20:], c.FileName)
+	flen := utf16le.EncodeSlice(p[20:], c.FileName, c.Mapping)
 
 	p[0] = c.ReplaceIfExists
 	le.PutUint64(p[8:16], c.RootDirectory)
@@ -692,6 +695,6 @@ func (c FileNameInformationDecoder) FileNameLength() uint32 {
 	return le.Uint32(c[:4])
 }
 
-func (c FileNameInformationDecoder) FileName() string {
-	return utf16le.DecodeToString(c[4 : 4+c.FileNameLength()])
+func (c FileNameInformationDecoder) FileName(mc utf16le.MapChars) string {
+	return utf16le.Decode(c[4:4+c.FileNameLength()], mc)
 }

@@ -181,7 +181,7 @@ func (r *NetShareEnumAllRequest) Encode(b []byte) {
 	le.PutUint32(b[32:36], 0)             // offset
 	le.PutUint32(b[36:40], uint32(count)) // actual count
 
-	utf16le.EncodeString(b[40:], r.ServerName) // server unc
+	utf16le.EncodeSlice(b[40:], r.ServerName, utf16le.MapCharsNone) // server unc
 
 	off := 40 + count*2
 	off = roundup(off, 4)
@@ -365,7 +365,7 @@ func (c NetShareEnumAllResponseDecoder) ShareNameList() []string {
 			noff := int(le.Uint32(c[offset+4 : offset+8]))    // offset
 			nlen := int(le.Uint32(c[offset+8:offset+12])) * 2 // actual count
 
-			ss[i] = utf16le.DecodeToString(c[offset+12+noff : offset+12+noff+nlen])
+			ss[i] = utf16le.Decode(c[offset+12+noff:offset+12+noff+nlen], utf16le.MapCharsNone)
 
 			offset = roundup(offset+12+noff+nlen, 4)
 		}
@@ -376,7 +376,7 @@ func (c NetShareEnumAllResponseDecoder) ShareNameList() []string {
 				noff := int(le.Uint32(c[offset+4 : offset+8]))    // offset
 				nlen := int(le.Uint32(c[offset+8:offset+12])) * 2 // actual count
 
-				ss[i] = utf16le.DecodeToString(c[offset+12+noff : offset+12+noff+nlen])
+				ss[i] = utf16le.Decode(c[offset+12+noff:offset+12+noff+nlen], utf16le.MapCharsNone)
 
 				offset = roundup(offset+12+noff+nlen, 4)
 			}

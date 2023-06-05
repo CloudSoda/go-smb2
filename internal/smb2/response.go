@@ -180,6 +180,7 @@ type SymbolicLinkErrorResponse struct {
 	Flags              uint32
 	SubstituteName     string
 	PrintName          string
+	Mapping            utf16le.MapChars
 }
 
 func (c *SymbolicLinkErrorResponse) Size() int {
@@ -187,8 +188,8 @@ func (c *SymbolicLinkErrorResponse) Size() int {
 }
 
 func (c *SymbolicLinkErrorResponse) Encode(p []byte) {
-	slen := utf16le.EncodeString(p[24:], c.SubstituteName)
-	plen := utf16le.EncodeString(p[24+slen:], c.PrintName)
+	slen := utf16le.EncodeSlice(p[24:], c.SubstituteName, c.Mapping)
+	plen := utf16le.EncodeSlice(p[24+slen:], c.PrintName, c.Mapping)
 
 	le.PutUint32(p[:4], uint32(len(p)-4)) // SymLinkLength
 	le.PutUint32(p[4:8], 0x4c4d5953)      // in ASCII: LMYS (SYML)
@@ -287,16 +288,16 @@ func (r SymbolicLinkErrorResponseDecoder) PathBuffer() []byte {
 	return r[28:]
 }
 
-func (r SymbolicLinkErrorResponseDecoder) SubstituteName() string {
+func (r SymbolicLinkErrorResponseDecoder) SubstituteName(mc utf16le.MapChars) string {
 	off := r.SubstituteNameOffset()
 	len := r.SubstituteNameLength()
-	return utf16le.DecodeToString(r.PathBuffer()[off : off+len])
+	return utf16le.Decode(r.PathBuffer()[off:off+len], mc)
 }
 
-func (r SymbolicLinkErrorResponseDecoder) PrintName() string {
+func (r SymbolicLinkErrorResponseDecoder) PrintName(mc utf16le.MapChars) string {
 	off := r.PrintNameOffset()
 	len := r.PrintNameLength()
-	return utf16le.DecodeToString(r.PathBuffer()[off : off+len])
+	return utf16le.Decode(r.PathBuffer()[off:off+len], mc)
 }
 
 func (r SymbolicLinkErrorResponseDecoder) SplitUnparsedPath(name string) (string, string) {

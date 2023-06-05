@@ -109,7 +109,7 @@ func (c *Client) Authenticate(cmsg []byte) (amsg []byte, err error) {
 		return nil, errors.New("invalid target info format")
 	}
 	targetInfo := cmsg[targetInfoBufferOffset : targetInfoBufferOffset+uint32(targetInfoLen)] // cmsg.TargetInfo
-	info := newTargetInfoEncoder(targetInfo, utf16le.EncodeStringToBytes(c.TargetSPN))
+	info := newTargetInfoEncoder(targetInfo, utf16le.Encode(c.TargetSPN, utf16le.MapCharsNone))
 	if info == nil {
 		return nil, errors.New("invalid target info format")
 	}
@@ -130,9 +130,9 @@ func (c *Client) Authenticate(cmsg []byte) (amsg []byte, err error) {
 
 	off := 64 + 8 + 16
 
-	domain := utf16le.EncodeStringToBytes(c.Domain)
-	user := utf16le.EncodeStringToBytes(c.User)
-	workstation := utf16le.EncodeStringToBytes(c.Workstation)
+	domain := utf16le.Encode(c.Domain, utf16le.MapCharsNone)
+	user := utf16le.Encode(c.User, utf16le.MapCharsNone)
+	workstation := utf16le.Encode(c.Workstation, utf16le.MapCharsNone)
 
 	if domain == nil {
 		domain = targetName
@@ -184,12 +184,12 @@ func (c *Client) Authenticate(cmsg []byte) (amsg []byte, err error) {
 		var h hash.Hash
 
 		if c.Hash != nil {
-			USER := utf16le.EncodeStringToBytes(strings.ToUpper(c.User))
+			USER := utf16le.Encode(strings.ToUpper(c.User), utf16le.MapCharsNone)
 
 			h = hmac.New(md5.New, ntowfv2Hash(USER, c.Hash, domain))
 		} else {
-			USER := utf16le.EncodeStringToBytes(strings.ToUpper(c.User))
-			password := utf16le.EncodeStringToBytes(c.Password)
+			USER := utf16le.Encode(strings.ToUpper(c.User), utf16le.MapCharsNone)
+			password := utf16le.Encode(c.Password, utf16le.MapCharsNone)
 
 			h = hmac.New(md5.New, ntowfv2(USER, password, domain))
 		}
