@@ -1168,7 +1168,7 @@ func (c *QueryDirectoryRequest) Encode(pkt []byte) {
 
 	le.PutUint16(req[24:26], uint16(off+64)) // FileNameOffset
 
-	flen := utf16le.EncodeSlice(req[off:], c.FileName, c.Mapping)
+	flen := utf16le.EncodeSlice(req[off:], c.FileName, utf16le.MapCharsNone) // this is a pattern, and should not have its characters mapped
 
 	le.PutUint16(req[26:28], uint16(flen)) // FileNameLength
 }

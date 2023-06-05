@@ -230,7 +230,9 @@ const (
 	FILE_ATTRIBUTE_NO_SCRUB_DATA       = 0x20000
 )
 
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/4718fc40-e539-4014-8e33-b675af74e3e1
 const (
+	// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/b38bf518-9057-4c88-9ddd-5e2d3976a64b
 	FileDirectoryInformation           = 1 + iota // 1
 	FileFullDirectoryInformation                  // 2
 	FileBothDirectoryInformation                  // 3
