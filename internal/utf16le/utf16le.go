@@ -137,6 +137,10 @@ func EncodedStringLen(s string) int {
 }
 
 func EncodeSlice(dst []byte, src string, mc MapChars) int {
+	if len(src) == 0 {
+		return 0
+	}
+
 	u16s := pathToU16s(src, mc)
 
 	for i, u16 := range u16s {

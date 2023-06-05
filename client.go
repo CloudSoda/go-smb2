@@ -265,6 +265,7 @@ func (fs *Share) WithContext(ctx context.Context) *Share {
 	return &Share{
 		treeConn: fs.treeConn,
 		ctx:      ctx,
+		mapping:  fs.mapping,
 	}
 }
 

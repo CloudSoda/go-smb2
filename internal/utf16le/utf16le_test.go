@@ -8,11 +8,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestEncodeNoneRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	testData := []string{
+		"a.txt",
+		"",
+		"a*.txt",
+		"a.",
+		"a ",
+		"a<b",
+		"a>b",
+		"a|b",
+		`\foo\file.txt`,
+		`foo\file.txt`,
+		`\foo\dir\`,
+		`fizz\buzz\file.txt`,
+	}
+
+	for _, td := range testData {
+		t.Run(td, func(t *testing.T) {
+			encoded := Encode(td, MapCharsNone)
+			decoded := Decode(encoded, MapCharsNone)
+			require.Equal(t, td, decoded)
+		})
+	}
+}
+
 func TestEncodeSFM(t *testing.T) {
 	t.Parallel()
 
 	/**
-	The expected value for each of these tests was retrieved by
+	The expected value for most of these tests was calculated by
 	1) mounting an smb share on linux with mapposix
 	2) creating each of the files by either touch'ing or programmatically creating it through the samba mount
 	3) then, using this library, list the created file and get the hex dump of the name string
@@ -77,6 +104,11 @@ func TestEncodeSFM(t *testing.T) {
 			input:       "a" + string(rune(0x1f)) + "b",
 			expectedHex: "61ef809f62",
 		},
+		{
+			scenario:    "empty string",
+			input:       "",
+			expectedHex: "",
+		},
 	}
 
 	for _, td := range testData {
@@ -95,7 +127,7 @@ func TestEncodeSFM(t *testing.T) {
 			t.Run("EncodeSlice", func(t *testing.T) {
 				encoded := make([]byte, EncodedStringLen(td.input))
 				written := EncodeSlice(encoded, td.input, MapCharsSFM)
-				require.NotZero(t, written)
+				require.Equal(t, len(td.input)*2, written)
 				u16s := make([]uint16, len(encoded)/2)
 				for i := range u16s {
 					u16s[i] = le.Uint16(encoded[2*i : 2*i+2])
@@ -245,6 +277,13 @@ func TestSFURoundtrip(t *testing.T) {
 			require.EqualValues(t, encodedLen, written)
 			decoded := Decode(buf, MapCharsSFU)
 			require.Equal(t, in, decoded)
+		})
+
+		t.Run("empty string", func(t *testing.T) {
+			t.Parallel()
+
+			written := EncodeSlice(nil, "", MapCharsSFU)
+			require.Zero(t, written)
 		})
 	})
 }
