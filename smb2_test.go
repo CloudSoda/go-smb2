@@ -61,6 +61,10 @@ type config struct {
 var cfg config
 var fs *smb2.Share
 var rfs *smb2.Share
+
+// services for mac ()
+var sfmFS *smb2.Share
+var sfuFS *smb2.Share
 var session *smb2.Session
 var dialer *smb2.Dialer
 
@@ -125,6 +129,18 @@ func connect(f func()) {
 			panic(err)
 		}
 		defer fs2.Umount()
+
+		sfmFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapPosix())
+		if err != nil {
+			panic(err)
+		}
+		defer sfmFS.Umount()
+
+		sfuFS, err = c.Mount(cfg.TreeConn.Share2, smb2.WithMapChars())
+		if err != nil {
+			panic(err)
+		}
+		defer sfuFS.Umount()
 
 		fs = fs1
 		rfs = fs2
