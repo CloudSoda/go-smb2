@@ -158,6 +158,60 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestSFMMount(t *testing.T) {
+	if sfmFS == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestSFMMount", os.Getpid())
+	err := sfmFS.Mkdir(testDir, 0755)
+	require.NoError(t, err)
+	defer sfmFS.RemoveAll(testDir)
+
+	reservedChars := []string{`"`, `*`, `:`, `<`, `>`, `?`, `|`, `.`, ` `}
+
+	t.Run("files with a reserved characters", func(t *testing.T) {
+		// create a file with each reserved character
+		for _, rc := range reservedChars {
+			data := []byte("bytes in the file" + rc)
+			name := "file-" + rc
+			err := sfmFS.WriteFile(join(testDir, name), data, 0644)
+			require.NoError(t, err)
+
+			// read it back
+			actual, err := sfmFS.ReadFile(join(testDir, name))
+			require.NoError(t, err)
+			require.Equal(t, data, actual)
+		}
+	})
+
+	t.Run("directories with a reserved character", func(t *testing.T) {
+		// create a directory with each reserved character
+		for _, rc := range reservedChars {
+			name := "dir-" + rc
+			// create the oddly named directory with a sub directory
+			err := sfmFS.MkdirAll(join(testDir, name, "subdir"), 0755)
+			require.NoError(t, err)
+
+			// list the contents of the oddly naed directory
+			f, err := sfmFS.Open(join(testDir, name))
+			require.NoError(t, err)
+			defer f.Close()
+
+			infos, err := f.Readdir(-1)
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			require.Equal(t, "subdir", infos[0].Name())
+		}
+	})
+}
+
+func TestSFUMount(t *testing.T) {
+	if sfuFS == nil {
+		t.Skip()
+	}
+}
+
 func TestReaddir(t *testing.T) {
 	if fs == nil {
 		t.Skip()
