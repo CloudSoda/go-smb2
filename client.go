@@ -84,7 +84,7 @@ The mount will apply character mapping to file names with reserved characters
 equivalent to samba's `mapchars` option.
 
 If no character mapping option is applied, reserved characters will be passed
-to the SMB server unchanged resulting in file with an 8.3 file name
+to the SMB server unchanged resulting in a file with an 8.3 file name
 (e.g. TEXTFI~1.TXT) https://en.wikipedia.org/wiki/8.3_filename.
 */
 func WithMapChars() MountOption {
@@ -98,7 +98,7 @@ The mount will apply character mapping to file names with reserved characters
 equivalent to samba's 'mapposix' option.
 
 If no character mapping option is applied, reserved characters will be passed
-to the SMB server unchanged resulting in file with an 8.3 file name
+to the SMB server unchanged resulting in a file with an 8.3 file name
 (e.g. TEXTFI~1.TXT) https://en.wikipedia.org/wiki/8.3_filename.
 */
 func WithMapPosix() MountOption {
@@ -556,7 +556,7 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		FileInfoClass:         FileRenameInformation,
 		AdditionalInformation: 0,
 		Input: &FileRenameInformationType2Encoder{
-			ReplaceIfExists: 0,
+			ReplaceIfExists: 1, // if a file exists at newpath, overwrite it
 			RootDirectory:   0,
 			FileName:        newpath,
 			Mapping:         fs.mapping,

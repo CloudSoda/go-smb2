@@ -232,8 +232,7 @@ const (
 
 // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/4718fc40-e539-4014-8e33-b675af74e3e1
 const (
-	// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/b38bf518-9057-4c88-9ddd-5e2d3976a64b
-	FileDirectoryInformation           = 1 + iota // 1
+	FileDirectoryInformation           = 1 + iota // 1 https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/b38bf518-9057-4c88-9ddd-5e2d3976a64b
 	FileFullDirectoryInformation                  // 2
 	FileBothDirectoryInformation                  // 3
 	FileBasicInformation                          // 4
@@ -242,7 +241,7 @@ const (
 	FileEaInformation                             // 7
 	FileAccessInformation                         // 8
 	FileNameInformation                           // 9
-	FileRenameInformation                         // 10
+	FileRenameInformation                         // 10 https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/1d2673a8-8fb9-4868-920a-775ccaa30cf8
 	FileLinkInformation                           // 11
 	FileNamesInformation                          // 12
 	FileDispositionInformation                    // 13

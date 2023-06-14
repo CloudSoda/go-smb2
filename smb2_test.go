@@ -587,9 +587,10 @@ func TestRename(t *testing.T) {
 	defer fs.Remove(testDir + `\new`)
 
 	_, err = fs.Stat(testDir + `\old`)
-	if os.IsExist(err) {
-		t.Error("unexpected error:", err)
-	}
+	require.ErrorIs(t, err, os.ErrNotExist)
+	// if os.IsExist(err) {
+	// 	t.Error("unexpected error:", err)
+	// }
 	f, err = fs.Open(testDir + `\new`)
 	if err != nil {
 		t.Fatal(err)
