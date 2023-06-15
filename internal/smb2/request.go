@@ -298,8 +298,9 @@ func (r LogoffRequestDecoder) StructureSize() uint16 {
 type TreeConnectRequest struct {
 	PacketHeader
 
-	Flags uint16
-	Path  string
+	Flags   uint16
+	Path    string
+	Mapping utf16le.MapChars
 }
 
 func (c *TreeConnectRequest) Header() *PacketHeader {
@@ -324,7 +325,7 @@ func (c *TreeConnectRequest) Encode(pkt []byte) {
 
 	// Path
 	{
-		plen := utf16le.EncodeString(req[8:], c.Path)
+		plen := utf16le.EncodeSlice(req[8:], c.Path, c.Mapping)
 
 		le.PutUint16(req[4:6], 8+64)         // PathOffset
 		le.PutUint16(req[6:8], uint16(plen)) // PathLength
@@ -365,14 +366,14 @@ func (r TreeConnectRequestDecoder) PathLength() uint16 {
 	return le.Uint16(r[6:8])
 }
 
-func (r TreeConnectRequestDecoder) Path() string {
+func (r TreeConnectRequestDecoder) Path(mc utf16le.MapChars) string {
 	off := r.PathOffset()
 	if off < 64+8 {
 		return ""
 	}
 	off -= 64
 	len := r.PathLength()
-	return utf16le.DecodeToString(r[off : off+len])
+	return utf16le.Decode(r[off:off+len], mc)
 }
 
 // ----------------------------------------------------------------------------
@@ -434,6 +435,7 @@ type CreateRequest struct {
 	CreateDisposition    uint32
 	CreateOptions        uint32
 	Name                 string
+	Mapping              utf16le.MapChars
 
 	Contexts []Encoder
 }
@@ -474,7 +476,7 @@ func (c *CreateRequest) Encode(pkt []byte) {
 	le.PutUint32(req[40:44], c.CreateOptions)
 
 	// Name
-	nlen := utf16le.EncodeString(req[56:], c.Name)
+	nlen := utf16le.EncodeSlice(req[56:], c.Name, c.Mapping)
 
 	le.PutUint16(req[44:46], 56+64)
 	le.PutUint16(req[46:48], uint16(nlen))
@@ -1135,6 +1137,7 @@ type QueryDirectoryRequest struct {
 	FileId             *FileId
 	OutputBufferLength uint32
 	FileName           string
+	Mapping            utf16le.MapChars
 }
 
 func (c *QueryDirectoryRequest) Header() *PacketHeader {
@@ -1165,7 +1168,7 @@ func (c *QueryDirectoryRequest) Encode(pkt []byte) {
 
 	le.PutUint16(req[24:26], uint16(off+64)) // FileNameOffset
 
-	flen := utf16le.EncodeString(req[off:], c.FileName)
+	flen := utf16le.EncodeSlice(req[off:], c.FileName, utf16le.MapCharsNone) // this is a pattern, and should not have its characters mapped
 
 	le.PutUint16(req[26:28], uint16(flen)) // FileNameLength
 }

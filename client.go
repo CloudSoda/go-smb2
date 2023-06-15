@@ -16,6 +16,7 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/msrpc"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
+	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
 
 // Dialer contains options for func (*Dialer) Dial.
@@ -71,6 +72,41 @@ func (d *Dialer) DialContext(ctx context.Context, tcpConn net.Conn) (*Session, e
 	return &Session{s: s, ctx: context.Background(), addr: tcpConn.RemoteAddr().String()}, nil
 }
 
+type mountOptions struct {
+	mapping utf16le.MapChars
+}
+
+// configures a Session.Mount() call
+type MountOption func(*mountOptions)
+
+/*
+The mount will apply character mapping to file names with reserved characters
+equivalent to samba's `mapchars` option.
+
+If no character mapping option is applied, reserved characters will be passed
+to the SMB server unchanged resulting in a file with an 8.3 file name
+(e.g. TEXTFI~1.TXT) https://en.wikipedia.org/wiki/8.3_filename.
+*/
+func WithMapChars() MountOption {
+	return func(opts *mountOptions) {
+		opts.mapping = utf16le.MapCharsSFU
+	}
+}
+
+/*
+The mount will apply character mapping to file names with reserved characters
+equivalent to samba's 'mapposix' option.
+
+If no character mapping option is applied, reserved characters will be passed
+to the SMB server unchanged resulting in a file with an 8.3 file name
+(e.g. TEXTFI~1.TXT) https://en.wikipedia.org/wiki/8.3_filename.
+*/
+func WithMapPosix() MountOption {
+	return func(opts *mountOptions) {
+		opts.mapping = utf16le.MapCharsSFM
+	}
+}
+
 // Session represents a SMB session.
 type Session struct {
 	s    *session
@@ -94,7 +130,7 @@ func (c *Session) Logoff() error {
 // sharename must follow format like `<share>` or `\\<server>\<share>`.
 // Note that the mounted share doesn't inherit session's context.
 // If you want to use the same context, call Share.WithContext manually.
-func (c *Session) Mount(sharename string) (*Share, error) {
+func (c *Session) Mount(sharename string, opts ...MountOption) (*Share, error) {
 	sharename = normPath(sharename)
 
 	if !strings.ContainsRune(sharename, '\\') {
@@ -105,12 +141,17 @@ func (c *Session) Mount(sharename string) (*Share, error) {
 		return nil, err
 	}
 
-	tc, err := treeConnect(c.s, sharename, 0, c.ctx)
+	var options mountOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	tc, err := treeConnect(c.s, sharename, 0, options.mapping, c.ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Share{treeConn: tc, ctx: context.Background()}, nil
+	return &Share{treeConn: tc, ctx: context.Background(), mapping: options.mapping}, nil
 }
 
 func (c *Session) ListSharenames() ([]string, error) {
@@ -223,7 +264,8 @@ func (c *Session) ListSharenames() ([]string, error) {
 // Share represents a SMB tree connection with VFS interface.
 type Share struct {
 	*treeConn
-	ctx context.Context
+	ctx     context.Context
+	mapping utf16le.MapChars
 }
 
 func (fs *Share) WithContext(ctx context.Context) *Share {
@@ -233,6 +275,7 @@ func (fs *Share) WithContext(ctx context.Context) *Share {
 	return &Share{
 		treeConn: fs.treeConn,
 		ctx:      ctx,
+		mapping:  fs.mapping,
 	}
 }
 
@@ -259,7 +302,7 @@ func (fs *Share) newFile(r CreateResponseDecoder, name string) *File {
 		FileName:       base(name),
 	}
 
-	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat}
+	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat, mapping: fs.mapping}
 
 	runtime.SetFinalizer(f, (*File).close)
 
@@ -325,6 +368,7 @@ func (fs *Share) OpenFile(name string, flag int, perm os.FileMode) (*File, error
 		ShareAccess:          sharemode,
 		CreateDisposition:    createmode,
 		CreateOptions:        FILE_SYNCHRONOUS_IO_NONALERT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, req, true)
@@ -354,6 +398,7 @@ func (fs *Share) Mkdir(name string, perm os.FileMode) error {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_CREATE,
 		CreateOptions:        FILE_DIRECTORY_FILE,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, req, false)
@@ -385,6 +430,7 @@ func (fs *Share) Readlink(name string) (string, error) {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, false)
@@ -415,7 +461,7 @@ func (fs *Share) Readlink(name string) (string, error) {
 		return "", &os.PathError{Op: "readlink", Path: f.name, Err: &InvalidResponseError{"broken symbolic link response data buffer format"}}
 	}
 
-	target := r.SubstituteName()
+	target := r.SubstituteName(fs.mapping)
 
 	switch {
 	case strings.HasPrefix(target, `\??\UNC\`):
@@ -456,6 +502,7 @@ func (fs *Share) remove(name string) error {
 		CreateDisposition:    FILE_OPEN,
 		// CreateOptions:        FILE_OPEN_REPARSE_POINT | FILE_DELETE_ON_CLOSE,
 		CreateOptions: FILE_OPEN_REPARSE_POINT,
+		Mapping:       fs.mapping,
 	}
 	// FILE_DELETE_ON_CLOSE doesn't work for reparse point, so use FileDispositionInformation instead
 
@@ -497,6 +544,7 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		ShareAccess:          FILE_SHARE_DELETE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(oldpath, create, false)
@@ -508,9 +556,10 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		FileInfoClass:         FileRenameInformation,
 		AdditionalInformation: 0,
 		Input: &FileRenameInformationType2Encoder{
-			ReplaceIfExists: 0,
+			ReplaceIfExists: 1, // if a file exists at newpath, overwrite it
 			RootDirectory:   0,
 			FileName:        newpath,
+			Mapping:         fs.mapping,
 		},
 	}
 
@@ -546,6 +595,7 @@ func (fs *Share) Symlink(target, linkpath string) error {
 	}
 
 	rdbuf := new(SymbolicLinkReparseDataBuffer)
+	rdbuf.Mapping = fs.mapping
 
 	if len(target) >= 2 && target[1] == ':' {
 		if len(target) == 2 {
@@ -575,6 +625,7 @@ func (fs *Share) Symlink(target, linkpath string) error {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_CREATE,
 		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(linkpath, create, false)
@@ -625,6 +676,7 @@ func (fs *Share) Lstat(name string) (os.FileInfo, error) {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, false)
@@ -659,6 +711,7 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        0,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, true)
@@ -697,6 +750,7 @@ func (fs *Share) Truncate(name string, size int64) error {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, true)
@@ -731,6 +785,7 @@ func (fs *Share) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        0,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, true)
@@ -774,6 +829,7 @@ func (fs *Share) Chmod(name string, mode os.FileMode) error {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        0,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, true)
@@ -886,6 +942,7 @@ func (fs *Share) Statfs(name string) (FileFsInfo, error) {
 		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
 		CreateDisposition:    FILE_OPEN,
 		CreateOptions:        FILE_DIRECTORY_FILE,
+		Mapping:              fs.mapping,
 	}
 
 	f, err := fs.createFile(name, create, true)
@@ -953,7 +1010,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 		if err != nil {
 			if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_STOPPED_ON_SYMLINK {
 				if len(rerr.data) > 0 {
-					name, err = evalSymlinkError(req.Name, rerr.data[0])
+					name, err = evalSymlinkError(req.Name, rerr.data[0], fs.mapping)
 					if err != nil {
 						return nil, err
 					}
@@ -976,7 +1033,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 	return nil, &InternalError{"Too many levels of symbolic links"}
 }
 
-func evalSymlinkError(name string, errData []byte) (string, error) {
+func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string, error) {
 	d := SymbolicLinkErrorResponseDecoder(errData)
 	if d.IsInvalid() {
 		return "", &InvalidResponseError{"broken symbolic link error response format"}
@@ -987,7 +1044,7 @@ func evalSymlinkError(name string, errData []byte) (string, error) {
 		return "", &InvalidResponseError{"broken symbolic link error response format"}
 	}
 
-	target := d.SubstituteName()
+	target := d.SubstituteName(mc)
 
 	switch {
 	case strings.HasPrefix(target, `\??\UNC\`):
@@ -1028,6 +1085,7 @@ type File struct {
 	fileStat    *FileStat
 	dirents     []os.FileInfo
 	noMoreFiles bool
+	mapping     utf16le.MapChars
 
 	offset int64
 
@@ -1939,6 +1997,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 		FileIndex:          0,
 		OutputBufferLength: uint32(f.maxTransactSize()),
 		FileName:           pattern,
+		Mapping:            f.mapping,
 	}
 
 	payloadSize := int(req.OutputBufferLength)
@@ -1977,7 +2036,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 			return nil, &InvalidResponseError{"broken query directory response format"}
 		}
 
-		name := info.FileName()
+		name := info.FileName(f.mapping)
 
 		if name != "." && name != ".." {
 			fi = append(fi, &FileStat{

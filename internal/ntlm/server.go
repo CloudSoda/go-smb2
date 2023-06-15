@@ -76,7 +76,7 @@ func (s *Server) Challenge(nmsg []byte) (cmsg []byte, err error) {
 		off += 8
 	}
 
-	targetName := utf16le.EncodeStringToBytes(s.targetName)
+	targetName := utf16le.Encode(s.targetName, utf16le.MapCharsNone)
 
 	cmsg = make([]byte, off+len(targetName)+4)
 
@@ -188,11 +188,11 @@ func (s *Server) Authenticate(amsg []byte) (err error) {
 	encryptedRandomSessionKey := amsg[encryptedRandomSessionKeyBufferOffset : encryptedRandomSessionKeyBufferOffset+uint32(encryptedRandomSessionKeyLen)] // amsg.EncryptedRandomSessionKey
 
 	if len(userName) != 0 || len(ntChallengeResponse) != 0 {
-		user := utf16le.DecodeToString(userName)
+		user := utf16le.Decode(userName, utf16le.MapCharsNone)
 		expectedNtChallengeResponse := make([]byte, len(ntChallengeResponse))
 		ntlmv2ClientChallenge := ntChallengeResponse[16:]
-		USER := utf16le.EncodeStringToBytes(strings.ToUpper(user))
-		password := utf16le.EncodeStringToBytes(s.accounts[user])
+		USER := utf16le.Encode(strings.ToUpper(user), utf16le.MapCharsNone)
+		password := utf16le.Encode(s.accounts[user], utf16le.MapCharsNone)
 		h := hmac.New(md5.New, ntowfv2(USER, password, domainName))
 		serverChallenge := s.cmsg[24:32]
 		timeStamp := ntlmv2ClientChallenge[8:16]

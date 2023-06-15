@@ -61,6 +61,10 @@ type config struct {
 var cfg config
 var fs *smb2.Share
 var rfs *smb2.Share
+
+// services for mac ()
+var sfmFS *smb2.Share
+var sfuFS *smb2.Share
 var session *smb2.Session
 var dialer *smb2.Dialer
 
@@ -126,6 +130,18 @@ func connect(f func()) {
 		}
 		defer fs2.Umount()
 
+		sfmFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapPosix())
+		if err != nil {
+			panic(err)
+		}
+		defer sfmFS.Umount()
+
+		sfuFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapChars())
+		if err != nil {
+			panic(err)
+		}
+		defer sfuFS.Umount()
+
 		fs = fs1
 		rfs = fs2
 		session = c
@@ -140,6 +156,102 @@ func TestMain(m *testing.M) {
 		code = m.Run()
 	})
 	os.Exit(code)
+}
+
+func TestSFMMount(t *testing.T) {
+	if sfmFS == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestSFMMount", os.Getpid())
+	err := sfmFS.Mkdir(testDir, 0755)
+	require.NoError(t, err)
+	defer sfmFS.RemoveAll(testDir)
+
+	reservedChars := []string{`"`, `*`, `:`, `<`, `>`, `?`, `|`, `.`, ` `}
+
+	t.Run("files with a reserved characters", func(t *testing.T) {
+		// create a file with each reserved character
+		for _, rc := range reservedChars {
+			data := []byte("bytes in the file" + rc)
+			name := "file-" + rc
+			err := sfmFS.WriteFile(join(testDir, name), data, 0644)
+			require.NoError(t, err)
+
+			// read it back
+			actual, err := sfmFS.ReadFile(join(testDir, name))
+			require.NoError(t, err)
+			require.Equal(t, data, actual)
+		}
+	})
+
+	t.Run("directories with a reserved character", func(t *testing.T) {
+		// create a directory with each reserved character
+		for _, rc := range reservedChars {
+			name := "dir-" + rc
+			// create the oddly named directory with a sub directory
+			err := sfmFS.MkdirAll(join(testDir, name, "subdir"), 0755)
+			require.NoError(t, err)
+
+			// list the contents of the oddly naed directory
+			f, err := sfmFS.Open(join(testDir, name))
+			require.NoError(t, err)
+			defer f.Close()
+
+			infos, err := f.Readdir(-1)
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			require.Equal(t, "subdir", infos[0].Name())
+		}
+	})
+}
+
+func TestSFUMount(t *testing.T) {
+	if sfuFS == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestSFUMount", os.Getpid())
+	err := sfuFS.Mkdir(testDir, 0755)
+	require.NoError(t, err)
+	defer sfuFS.RemoveAll(testDir)
+
+	reservedChars := []string{`*`, `?`, `:`, `>`, `<`, `|`}
+
+	t.Run("files with a reserved characters", func(t *testing.T) {
+		// create a file with each reserved character
+		for _, rc := range reservedChars {
+			data := []byte("bytes in the file" + rc)
+			name := "file-" + rc
+			err := sfuFS.WriteFile(join(testDir, name), data, 0644)
+			require.NoError(t, err)
+
+			// read it back
+			actual, err := sfuFS.ReadFile(join(testDir, name))
+			require.NoError(t, err)
+			require.Equal(t, data, actual)
+		}
+	})
+
+	t.Run("directories with a reserved character", func(t *testing.T) {
+		// create a directory with each reserved character
+		for _, rc := range reservedChars {
+			name := "dir-" + rc
+			// create the oddly named directory with a sub directory
+			err := sfuFS.MkdirAll(join(testDir, name, "subdir"), 0755)
+			require.NoError(t, err)
+
+			// list the contents of the oddly naed directory
+			f, err := sfuFS.Open(join(testDir, name))
+			require.NoError(t, err)
+			defer f.Close()
+
+			infos, err := f.Readdir(-1)
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			require.Equal(t, "subdir", infos[0].Name())
+		}
+	})
 }
 
 func TestReaddir(t *testing.T) {
@@ -446,50 +558,54 @@ func TestRename(t *testing.T) {
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestRename", os.Getpid())
 	err := fs.Mkdir(testDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer fs.RemoveAll(testDir)
 
-	f, err := fs.Create(testDir + `\old`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.Write([]byte("testContent"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = f.Close()
-	if err != nil {
-		fs.Remove(testDir + `\old`)
+	t.Run("move", func(t *testing.T) {
+		f, err := fs.Create(testDir + `\old`)
+		require.NoError(t, err)
+		data := []byte("testContent")
+		_, err = f.Write(data)
+		require.NoError(t, err)
+		err = f.Close()
+		require.NoError(t, err)
 
-		t.Fatal(err)
-	}
+		err = fs.Rename(testDir+`\old`, testDir+`\new`)
+		require.NoError(t, err)
 
-	err = fs.Rename(testDir+`\old`, testDir+`\new`)
-	if err != nil {
-		fs.Remove(testDir + `\old`)
+		_, err = fs.Stat(testDir + `\old`)
+		require.ErrorIs(t, err, os.ErrNotExist)
 
-		t.Fatal(err)
-	}
-	defer fs.Remove(testDir + `\new`)
+		f, err = fs.Open(testDir + `\new`)
+		require.NoError(t, err)
+		defer f.Close()
+		actualData, err := io.ReadAll(f)
+		require.NoError(t, err)
+		require.Equal(t, data, actualData)
+	})
 
-	_, err = fs.Stat(testDir + `\old`)
-	if os.IsExist(err) {
-		t.Error("unexpected error:", err)
-	}
-	f, err = fs.Open(testDir + `\new`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	bs, err := io.ReadAll(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(bs) != "testContent" {
-		t.Error("unexpected content:", string(bs))
-	}
+	t.Run("move and overwrite", func(t *testing.T) {
+		data := []byte("the final data")
+		oldName := ".sourceFile"
+		newName := "destinationFile"
+		err := fs.WriteFile(join(testDir, oldName), data, 0644)
+		require.NoError(t, err)
+
+		err = fs.WriteFile(join(testDir, newName), []byte("doesn't matter"), 0644)
+		require.NoError(t, err)
+
+		err = fs.Rename(join(testDir, oldName), join(testDir, newName))
+		require.NoError(t, err)
+
+		// make sure there is no file at the old path, and that old data is in the new path
+		info, err := fs.Stat(join(testDir, oldName))
+		require.ErrorIs(t, err, os.ErrNotExist)
+		require.Nil(t, info)
+
+		actualData, err := fs.ReadFile(join(testDir, newName))
+		require.NoError(t, err)
+		require.Equal(t, data, actualData)
+	})
 }
 
 func TestChtimes(t *testing.T) {

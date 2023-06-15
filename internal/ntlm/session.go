@@ -48,11 +48,11 @@ type InfoMap struct {
 // TODO export to somewhere
 func (s *Session) InfoMap() *InfoMap {
 	return &InfoMap{
-		NbComputerName:  utf16le.DecodeToString(s.infoMap[MsvAvNbComputerName]),
-		NbDomainName:    utf16le.DecodeToString(s.infoMap[MsvAvNbDomainName]),
-		DnsComputerName: utf16le.DecodeToString(s.infoMap[MsvAvDnsComputerName]),
-		DnsDomainName:   utf16le.DecodeToString(s.infoMap[MsvAvDnsDomainName]),
-		DnsTreeName:     utf16le.DecodeToString(s.infoMap[MsvAvDnsTreeName]),
+		NbComputerName:  utf16le.Decode(s.infoMap[MsvAvNbComputerName], utf16le.MapCharsNone),
+		NbDomainName:    utf16le.Decode(s.infoMap[MsvAvNbDomainName], utf16le.MapCharsNone),
+		DnsComputerName: utf16le.Decode(s.infoMap[MsvAvDnsComputerName], utf16le.MapCharsNone),
+		DnsDomainName:   utf16le.Decode(s.infoMap[MsvAvDnsDomainName], utf16le.MapCharsNone),
+		DnsTreeName:     utf16le.Decode(s.infoMap[MsvAvDnsTreeName], utf16le.MapCharsNone),
 		// Flags:           le.Uint32(s.infoMap[MsvAvFlags]),
 	}
 }
