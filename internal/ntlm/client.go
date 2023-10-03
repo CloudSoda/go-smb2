@@ -23,7 +23,7 @@ type Client struct {
 	Workstation string // e.g "localhost", "HOME-PC"
 
 	TargetSPN       string           // SPN ::= "service/hostname[:port]"; e.g "cifs/remotehost:1020"
-	channelBindings *channelBindings // reserved for future implementation
+	channelBindings *channelBindings //nolint:unused // reserved for future implementation
 
 	nmsg    []byte
 	session *Session

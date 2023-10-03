@@ -19,9 +19,11 @@ type ccm struct {
 // NewCCMWithNonceAndTagSizes returns the given 128-bit, block cipher wrapped in Counter with CBC-MAC Mode, which accepts nonces of the given length.
 // the formatting of this function is defined in SP800-38C, Appendix A.
 // Each arguments have own valid range:
-//   nonceSize should be one of the {7, 8, 9, 10, 11, 12, 13}.
-//   tagSize should be one of the {4, 6, 8, 10, 12, 14, 16}.
-//   Otherwise, it panics.
+//
+//	nonceSize should be one of the {7, 8, 9, 10, 11, 12, 13}.
+//	tagSize should be one of the {4, 6, 8, 10, 12, 14, 16}.
+//	Otherwise, it panics.
+//
 // The maximum payload size is defined as 1<<uint((15-nonceSize)*8)-1.
 // If the given payload size exceeds the limit, it returns a error (Seal returns nil instead).
 // The payload size is defined as len(plaintext) on Seal, len(ciphertext)-tagSize on Open.
@@ -140,32 +142,32 @@ func (ccm *ccm) getTag(Ctr, data, plaintext []byte) []byte {
 	if len(data) > 0 {
 		B[0] |= 1 << 6 // Adata
 
-		ccm.mac.Write(B)
+		_, _ = ccm.mac.Write(B)
 
 		if len(data) < (1<<15 - 1<<7) {
 			putUvarint(B[:2], uint64(len(data)))
 
-			ccm.mac.Write(B[:2])
+			_, _ = ccm.mac.Write(B[:2])
 		} else if len(data) <= 1<<31-1 {
 			B[0] = 0xff
 			B[1] = 0xfe
 			putUvarint(B[2:6], uint64(len(data)))
 
-			ccm.mac.Write(B[:6])
+			_, _ = ccm.mac.Write(B[:6])
 		} else {
 			B[0] = 0xff
 			B[1] = 0xff
 			putUvarint(B[2:10], uint64(len(data)))
 
-			ccm.mac.Write(B[:10])
+			_, _ = ccm.mac.Write(B[:10])
 		}
-		ccm.mac.Write(data)
+		_, _ = ccm.mac.Write(data)
 		ccm.mac.PadZero()
 	} else {
-		ccm.mac.Write(B)
+		_, _ = ccm.mac.Write(B)
 	}
 
-	ccm.mac.Write(plaintext)
+	_, _ = ccm.mac.Write(plaintext)
 	ccm.mac.PadZero()
 
 	return ccm.mac.Sum(nil)
