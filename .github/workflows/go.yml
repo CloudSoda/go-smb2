@@ -30,6 +30,11 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
+    - uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.52.2
+        skip-cache: true
+        args: --timeout=8m
   test_windows:
     strategy:
       matrix:
@@ -57,3 +62,9 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
+    - uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.52.2
+        skip-cache: true
+        args: --timeout=8m
+  
