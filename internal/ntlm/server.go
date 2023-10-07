@@ -97,6 +97,7 @@ func (s *Server) Challenge(nmsg []byte) (cmsg []byte, err error) {
 		le.PutUint16(cmsg[40:42], uint16(len))
 		le.PutUint16(cmsg[42:44], uint16(len))
 		le.PutUint32(cmsg[44:48], uint32(off))
+		//nolint:ineffassign // we know that this does nothing, it will be removed in a later cleanup
 		off += len
 	}
 

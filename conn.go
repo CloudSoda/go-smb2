@@ -322,10 +322,12 @@ func (conn *conn) enableSession() {
 	atomic.StoreInt32(&conn._useSession, 1)
 }
 
+//nolint:unused // appears to be legacy, unsure, so leaving for now
 func (conn *conn) newTimer() *time.Timer {
 	return time.NewTimer(5 * time.Second)
 }
 
+//nolint:unused // appears to be legacy, unsure, so leaving for now
 func (conn *conn) sendRecv(cmd uint16, req Packet, ctx context.Context) (res []byte, err error) {
 	rr, err := conn.send(req, ctx)
 	if err != nil {

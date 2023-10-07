@@ -8,7 +8,7 @@ import (
 	"hash"
 	"hash/crc32"
 
-	"golang.org/x/crypto/md4"
+	"golang.org/x/crypto/md4" //nolint:staticcheck // md4 may be deprecated, but SMB still uses it
 )
 
 var zero [16]byte
@@ -78,12 +78,15 @@ const (
 	MsvAvChannelBindings
 )
 
+//nolint:unused
 type addr struct {
 	typ uint32
 	val []byte
 }
 
 // channelBindings represents gss_channel_bindings_struct
+//
+//nolint:unused
 type channelBindings struct {
 	InitiatorAddress addr
 	AcceptorAddress  addr
@@ -236,6 +239,7 @@ func (i *targetInfoEncoder) encode(dst []byte) {
 	le.PutUint16(dst[off:off+2], MsvAvEOL)
 	le.PutUint16(dst[off+2:off+4], 0)
 
+	//nolint:ineffassign // we know that this does nothing, it will be removed in a later cleanup
 	off += 4
 }
 

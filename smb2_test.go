@@ -116,31 +116,41 @@ func connect(f func()) {
 		if err != nil {
 			panic(err)
 		}
-		defer c.Logoff()
+		defer func() {
+			_ = c.Logoff()
+		}()
 
 		fs1, err := c.Mount(cfg.TreeConn.Share1)
 		if err != nil {
 			panic(err)
 		}
-		defer fs1.Umount()
+		defer func() {
+			_ = fs1.Umount()
+		}()
 
 		fs2, err := c.Mount(cfg.TreeConn.Share2)
 		if err != nil {
 			panic(err)
 		}
-		defer fs2.Umount()
+		defer func() {
+			_ = fs2.Umount()
+		}()
 
 		sfmFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapPosix())
 		if err != nil {
 			panic(err)
 		}
-		defer sfmFS.Umount()
+		defer func() {
+			_ = sfmFS.Umount()
+		}()
 
 		sfuFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapChars())
 		if err != nil {
 			panic(err)
 		}
-		defer sfuFS.Umount()
+		defer func() {
+			_ = sfuFS.Umount()
+		}()
 
 		fs = fs1
 		rfs = fs2
@@ -166,7 +176,9 @@ func TestSFMMount(t *testing.T) {
 	testDir := fmt.Sprintf("testDir-%d-TestSFMMount", os.Getpid())
 	err := sfmFS.Mkdir(testDir, 0755)
 	require.NoError(t, err)
-	defer sfmFS.RemoveAll(testDir)
+	defer func() {
+		_ = sfmFS.RemoveAll(testDir)
+	}()
 
 	reservedChars := []string{`"`, `*`, `:`, `<`, `>`, `?`, `|`, `.`, ` `}
 
@@ -214,7 +226,9 @@ func TestSFUMount(t *testing.T) {
 	testDir := fmt.Sprintf("testDir-%d-TestSFUMount", os.Getpid())
 	err := sfuFS.Mkdir(testDir, 0755)
 	require.NoError(t, err)
-	defer sfuFS.RemoveAll(testDir)
+	defer func() {
+		_ = sfuFS.RemoveAll(testDir)
+	}()
 
 	reservedChars := []string{`*`, `?`, `:`, `>`, `<`, `|`}
 
@@ -263,7 +277,9 @@ func TestReaddir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	d, err := fs.Open(testDir)
 	if err != nil {
@@ -283,14 +299,18 @@ func TestReaddir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Remove(testDir + `\testFile`)
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\testFile`)
+	}()
 
 	d2, err := fs.Open(testDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d2.Close()
+	defer func() {
+		_ = d2.Close()
+	}()
 
 	fi2, err := d2.Readdir(-1)
 	if err != nil {
@@ -314,14 +334,18 @@ func TestFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	f, err := fs.Create(testDir + `\testFile`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Remove(testDir + `\testFile`)
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\testFile`)
+	}()
 
 	if f.Name() != testDir+`\testFile` {
 		t.Error("unexpected name:", f.Name())
@@ -386,7 +410,7 @@ func TestFile(t *testing.T) {
 		t.Error("should be not a directory")
 	}
 
-	f.Truncate(4)
+	_ = f.Truncate(4)
 
 	n64, err = f.Seek(-3, io.SeekEnd)
 	if err != nil {
@@ -420,14 +444,18 @@ func TestSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	f, err := fs.Create(testDir + `\testFile`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Remove(testDir + `\testFile`)
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\testFile`)
+	}()
 
 	_, err = f.Write([]byte("testContent"))
 	if err != nil {
@@ -440,7 +468,9 @@ func TestSymlink(t *testing.T) {
 		if err != nil {
 			t.Skip("samba doesn't support reparse point")
 		}
-		defer fs.Remove(testDir + `\linkToTestFile`)
+		defer func() {
+			_ = fs.Remove(testDir + `\linkToTestFile`)
+		}()
 
 		stat, err := fs.Lstat(testDir + `\linkToTestFile`)
 		if err != nil {
@@ -486,14 +516,18 @@ func TestIsXXX(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	f, err := fs.Create(testDir + `\Exist`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Remove(testDir + `\Exist`)
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\Exist`)
+	}()
 
 	_, err = fs.OpenFile(testDir+`\Exist`, os.O_CREATE|os.O_EXCL, 0666)
 	if !os.IsExist(err) {
@@ -559,7 +593,9 @@ func TestRename(t *testing.T) {
 	testDir := fmt.Sprintf("testDir-%d-TestRename", os.Getpid())
 	err := fs.Mkdir(testDir, 0755)
 	require.NoError(t, err)
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	t.Run("move", func(t *testing.T) {
 		f, err := fs.Create(testDir + `\old`)
@@ -617,7 +653,9 @@ func TestChtimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	f, err := fs.Create(testDir + `\testFile`)
 	if err != nil {
@@ -625,8 +663,7 @@ func TestChtimes(t *testing.T) {
 	}
 	err = f.Close()
 	if err != nil {
-		fs.Remove(testDir + `\testFile`)
-
+		_ = fs.Remove(testDir + `\testFile`)
 		t.Fatal(err)
 	}
 
@@ -663,14 +700,18 @@ func TestChmod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	f, err := fs.Create(testDir + `\testFile`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Remove(testDir + `\testFile`)
-	defer f.Close()
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\testFile`)
+	}()
 
 	stat, err := f.Stat()
 	if err != nil {
@@ -725,7 +766,9 @@ func TestServerSideCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	err = fs.WriteFile(join(testDir, "src.txt"), []byte("hello world!"), 0666)
 	if err != nil {
@@ -904,15 +947,15 @@ func TestContextError(t *testing.T) {
 	checkError2("fsync", err)
 	err = f.Truncate(1)
 	checkError2("ftruncate", err)
-	f.Seek(0, io.SeekStart)
+	_, _ = f.Seek(0, io.SeekStart)
 	_, err = f.Write([]byte("aa"))
 	checkError2("fwrite", err)
 	_, err = f.WriteAt([]byte("aa"), 0)
 	checkError2("fwriteat", err)
-	f.Seek(0, io.SeekStart)
+	_, _ = f.Seek(0, io.SeekStart)
 	_, err = f.WriteString("aa")
 	checkError2("fwritestring", err)
-	f.Seek(0, io.SeekStart)
+	_, _ = f.Seek(0, io.SeekStart)
 	_, err = f.WriteTo(bytes.NewBufferString("aaa"))
 	checkError2("fwriteto", err)
 }
@@ -927,7 +970,9 @@ func TestGlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(testDir)
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
 
 	for _, dir := range []string{"", "dir1", "dir2", "dir3"} {
 		if dir != "" {

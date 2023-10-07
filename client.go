@@ -161,7 +161,9 @@ func (c *Session) ListSharenames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer fs.Umount()
+	defer func() {
+		_ = fs.Umount()
+	}()
 
 	fs = fs.WithContext(c.ctx)
 
@@ -376,7 +378,7 @@ func (fs *Share) OpenFile(name string, flag int, perm os.FileMode) (*File, error
 		return nil, &os.PathError{Op: "open", Path: name, Err: err}
 	}
 	if flag&os.O_APPEND != 0 {
-		f.seek(0, io.SeekEnd)
+		_, _ = f.seek(0, io.SeekEnd)
 	}
 	return f, nil
 }
@@ -645,7 +647,7 @@ func (fs *Share) Symlink(target, linkpath string) error {
 
 	_, err = f.ioctl(req)
 	if err != nil {
-		f.remove()
+		_ = f.remove()
 		f.close()
 
 		return &os.PathError{Op: "symlink", Path: f.name, Err: err}

@@ -78,19 +78,19 @@ func TestCMAC(t *testing.T) {
 		t.Error("fail")
 	}
 
-	h.Write(msg2)
+	_, _ = h.Write(msg2)
 
 	if !bytes.Equal(h.Sum(nil), sum2) {
 		t.Error("fail")
 	}
 
-	h.Write(msg3)
+	_, _ = h.Write(msg3)
 
 	if !bytes.Equal(h.Sum(nil), sum3) {
 		t.Error("fail")
 	}
 
-	h.Write(msg4)
+	_, _ = h.Write(msg4)
 
 	if !bytes.Equal(h.Sum(nil), sum4) {
 		t.Error("fail")

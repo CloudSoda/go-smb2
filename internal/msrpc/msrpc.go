@@ -68,11 +68,11 @@ func (r *Bind) Encode(b []byte) {
 	le.PutUint16(b[28:30], 0)        // ctx item[1] .context id
 	le.PutUint16(b[30:32], 1)        // ctx item[1] .num trans items
 
-	hex.Decode(b[32:48], SRVSVC_UUID)
+	_, _ = hex.Decode(b[32:48], SRVSVC_UUID)
 	le.PutUint16(b[48:50], SRVSVC_VERSION)
 	le.PutUint16(b[50:52], SRVSVC_VERSION_MINOR)
 
-	hex.Decode(b[52:68], NDR_UUID)
+	_, _ = hex.Decode(b[52:68], NDR_UUID)
 	le.PutUint32(b[68:72], NDR_VERSION)
 }
 

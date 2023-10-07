@@ -21,7 +21,7 @@ import (
 func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error) {
 	spnego := newSpnegoClient([]Initiator{i})
 
-	outputToken, err := spnego.initSecContext()
+	outputToken, err := spnego.InitSecContext()
 	if err != nil {
 		return nil, &InvalidResponseError{err.Error()}
 	}
@@ -105,7 +105,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 
 	}
 
-	outputToken, err = spnego.acceptSecContext(r.SecurityBuffer())
+	outputToken, err = spnego.AcceptSecContext(r.SecurityBuffer())
 	if err != nil {
 		return nil, &InvalidResponseError{err.Error()}
 	}
@@ -124,7 +124,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 	}
 
 	if s.sessionFlags&(SMB2_SESSION_FLAG_IS_GUEST|SMB2_SESSION_FLAG_IS_NULL) == 0 {
-		sessionKey := spnego.sessionKey()
+		sessionKey := spnego.SessionKey()
 
 		switch conn.dialect {
 		case SMB202, SMB210:
