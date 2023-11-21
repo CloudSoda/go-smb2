@@ -1,7 +1,6 @@
 package smb2
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
@@ -44,17 +43,4 @@ type ResponseError struct {
 
 func (err *ResponseError) Error() string {
 	return fmt.Sprintf("response error: %v", erref.NtStatus(err.Code))
-}
-
-// ContextError wraps a context error to support os.IsTimeout function.
-type ContextError struct {
-	Err error
-}
-
-func (err *ContextError) Timeout() bool {
-	return err.Err == context.DeadlineExceeded
-}
-
-func (err *ContextError) Error() string {
-	return err.Err.Error()
 }
