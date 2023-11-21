@@ -378,7 +378,7 @@ func (conn *conn) sendWith(req Packet, tc *treeConn, ctx context.Context) (rr *r
 
 	select {
 	case <-ctx.Done():
-		return nil, &ContextError{Err: ctx.Err()}
+		return nil, ctx.Err()
 	default:
 		// do nothing
 	}
@@ -400,12 +400,12 @@ func (conn *conn) sendWith(req Packet, tc *treeConn, ctx context.Context) (rr *r
 		case <-ctx.Done():
 			conn.outstandingRequests.pop(rr.msgId)
 
-			return nil, &ContextError{Err: ctx.Err()}
+			return nil, ctx.Err()
 		}
 	case <-ctx.Done():
 		conn.outstandingRequests.pop(rr.msgId)
 
-		return nil, &ContextError{Err: ctx.Err()}
+		return nil, ctx.Err()
 	}
 
 	return rr, nil
@@ -483,7 +483,7 @@ func (conn *conn) recv(rr *requestResponse) ([]byte, error) {
 	case <-rr.ctx.Done():
 		conn.outstandingRequests.pop(rr.msgId)
 
-		return nil, &ContextError{Err: rr.ctx.Err()}
+		return nil, rr.ctx.Err()
 	}
 }
 
