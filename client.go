@@ -36,7 +36,13 @@ func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
-	return d.DialConn(ctx, conn, address)
+
+	s, err := d.DialConn(ctx, conn, address)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 /*
