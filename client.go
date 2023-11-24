@@ -26,15 +26,12 @@ type Dialer struct {
 	Initiator        Initiator
 }
 
-// Dial performs negotiation and authentication.
-// It returns a session. It doesn't support NetBIOS transport.
-// This implementation doesn't support multi-session on the same TCP connection.
-// If you want to use another session, you need to prepare another TCP connection at first.
-func (d *Dialer) Dial(tcpConn net.Conn) (*Session, error) {
-	return d.DialContext(context.Background(), tcpConn)
-}
-
-func (d *Dialer) Dial2(ctx context.Context, address string) (*Session, error) {
+/*
+Dial connects to the SMB server and performs negotiation and authentication.
+The returned session doesn't inherit the context. If you want to use the same
+context call Session.WithContext.
+*/
+func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
@@ -42,6 +39,13 @@ func (d *Dialer) Dial2(ctx context.Context, address string) (*Session, error) {
 	return d.DialConn(ctx, conn, address)
 }
 
+/*
+DialConn performs negotation and authentication to the server at the other end
+of tcpConn. The returned session doesn't inherit the context. If you want to
+use the same context call Session.WithContext. Note: Multiple sessions may not
+be negotiated on a single TCP connection, so if you want another session you
+must provide another TCP connection.
+*/
 func (d *Dialer) DialConn(ctx context.Context, tcpConn net.Conn, address string) (*Session, error) {
 	if ctx == nil {
 		panic("nil context")
@@ -68,43 +72,6 @@ func (d *Dialer) DialConn(ctx context.Context, tcpConn net.Conn, address string)
 	}
 
 	return &Session{s: s, ctx: context.Background(), addr: tcpConn.RemoteAddr().String(), host: address}, nil
-}
-
-func (d *Dialer) DialContext(ctx context.Context, tcpConn net.Conn) (*Session, error) {
-	return d.DialContextWithHostname(ctx, tcpConn, "")
-}
-
-// DialContext performs negotiation and authentication using the provided context.
-// Note that returned session doesn't inherit context.
-// If you want to use the same context, call Session.WithContext manually.
-// This implementation doesn't support multi-session on the same TCP connection.
-// If you want to use another session, you need to prepare another TCP connection at first.
-func (d *Dialer) DialContextWithHostname(ctx context.Context, tcpConn net.Conn, hostname string) (*Session, error) {
-	if ctx == nil {
-		panic("nil context")
-	}
-	if d.Initiator == nil {
-		return nil, &InternalError{"Initiator is empty"}
-	}
-
-	maxCreditBalance := d.MaxCreditBalance
-	if maxCreditBalance == 0 {
-		maxCreditBalance = clientMaxCreditBalance
-	}
-
-	a := openAccount(maxCreditBalance)
-
-	conn, err := d.Negotiator.negotiate(direct(tcpConn), a, ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	s, err := sessionSetup(conn, d.Initiator, ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Session{s: s, ctx: context.Background(), addr: tcpConn.RemoteAddr().String(), host: hostname}, nil
 }
 
 type mountOptions struct {

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"reflect"
 	"sort"
@@ -86,12 +85,6 @@ func connect(f func()) {
 			goto NO_CONNECTION
 		}
 
-		conn, err := net.Dial(cfg.Transport.Type, fmt.Sprintf("%s:%d", cfg.Transport.Host, cfg.Transport.Port))
-		if err != nil {
-			panic(err)
-		}
-		defer conn.Close()
-
 		if cfg.Session.Type != "ntlm" {
 			panic("unsupported session type")
 		}
@@ -111,7 +104,7 @@ func connect(f func()) {
 			},
 		}
 
-		c, err := dialer.Dial(conn)
+		c, err := dialer.Dial(context.Background(), fmt.Sprintf("%s:%d", cfg.Transport.Host, cfg.Transport.Port))
 		if err != nil {
 			panic(err)
 		}
