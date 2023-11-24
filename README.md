@@ -35,12 +35,6 @@ import (
 )
 
 func main() {
-	conn, err := net.Dial("tcp", "SERVERNAME:445")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     "USERNAME",
@@ -48,7 +42,7 @@ func main() {
 		},
 	}
 
-	s, err := d.Dial(conn)
+	s, err := d.Dial(context.Background(), "SERVERNAME:445")
 	if err != nil {
 		panic(err)
 	}
@@ -78,12 +72,6 @@ import (
 )
 
 func main() {
-	conn, err := net.Dial("tcp", "SERVERNAME:445")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     "USERNAME",
@@ -91,7 +79,7 @@ func main() {
 		},
 	}
 
-	s, err := d.Dial(conn)
+	s, err := d.Dial(context.Background(), "SERVERNAME:445")
 	if err != nil {
 		panic(err)
 	}
@@ -144,12 +132,6 @@ import (
 )
 
 func main() {
-	conn, err := net.Dial("tcp", "SERVERNAME:445")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     "USERNAME",
@@ -157,7 +139,7 @@ func main() {
 		},
 	}
 
-	s, err := d.Dial(conn)
+	s, err := d.Dial(context.Background(), "SERVERNAME:445")
 	if err != nil {
 		panic(err)
 	}
@@ -201,12 +183,6 @@ import (
 )
 
 func main() {
-	conn, err := net.Dial("tcp", "SERVERNAME:445")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     "USERNAME",
@@ -214,7 +190,7 @@ func main() {
 		},
 	}
 
-	s, err := d.Dial(conn)
+	s, err := d.Dial(context.Background(), "SERVERNAME:445")
 	if err != nil {
 		panic(err)
 	}

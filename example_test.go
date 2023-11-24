@@ -1,20 +1,14 @@
 package smb2_test
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"net"
 
 	"github.com/cloudsoda/go-smb2"
 )
 
 func Example() {
-	conn, err := net.Dial("tcp", "localhost:445")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     "Guest",
@@ -23,7 +17,7 @@ func Example() {
 		},
 	}
 
-	c, err := d.Dial(conn)
+	c, err := d.Dial(context.Background(), "localhost:445")
 	if err != nil {
 		panic(err)
 	}

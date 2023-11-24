@@ -26,20 +26,33 @@ type Dialer struct {
 	Initiator        Initiator
 }
 
-// Dial performs negotiation and authentication.
-// It returns a session. It doesn't support NetBIOS transport.
-// This implementation doesn't support multi-session on the same TCP connection.
-// If you want to use another session, you need to prepare another TCP connection at first.
-func (d *Dialer) Dial(tcpConn net.Conn) (*Session, error) {
-	return d.DialContext(context.Background(), tcpConn)
+/*
+Dial connects to the SMB server and performs negotiation and authentication.
+The returned session doesn't inherit the context. If you want to use the same
+context call Session.WithContext.
+*/
+func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("establishing TCP connection: %w", err)
+	}
+
+	s, err := d.DialConn(ctx, conn, address)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
-// DialContext performs negotiation and authentication using the provided context.
-// Note that returned session doesn't inherit context.
-// If you want to use the same context, call Session.WithContext manually.
-// This implementation doesn't support multi-session on the same TCP connection.
-// If you want to use another session, you need to prepare another TCP connection at first.
-func (d *Dialer) DialContext(ctx context.Context, tcpConn net.Conn) (*Session, error) {
+/*
+DialConn performs negotation and authentication to the server at the other end
+of tcpConn. The returned session doesn't inherit the context. If you want to
+use the same context call Session.WithContext. Note: Multiple sessions may not
+be negotiated on a single TCP connection, so if you want another session you
+must provide another TCP connection.
+*/
+func (d *Dialer) DialConn(ctx context.Context, tcpConn net.Conn, address string) (*Session, error) {
 	if ctx == nil {
 		panic("nil context")
 	}
@@ -64,7 +77,7 @@ func (d *Dialer) DialContext(ctx context.Context, tcpConn net.Conn) (*Session, e
 		return nil, err
 	}
 
-	return &Session{s: s, ctx: context.Background(), addr: tcpConn.RemoteAddr().String()}, nil
+	return &Session{s: s, ctx: context.Background(), addr: tcpConn.RemoteAddr().String(), host: address}, nil
 }
 
 type mountOptions struct {
@@ -107,13 +120,14 @@ type Session struct {
 	s    *session
 	ctx  context.Context
 	addr string
+	host string
 }
 
 func (c *Session) WithContext(ctx context.Context) *Session {
 	if ctx == nil {
 		panic("nil context")
 	}
-	return &Session{s: c.s, ctx: ctx, addr: c.addr}
+	return &Session{s: c.s, ctx: ctx, addr: c.addr, host: c.host}
 }
 
 // Logoff invalidates the current SMB session.
@@ -129,7 +143,11 @@ func (c *Session) Mount(sharename string, opts ...MountOption) (*Share, error) {
 	sharename = normPath(sharename)
 
 	if !strings.ContainsRune(sharename, '\\') {
-		sharename = fmt.Sprintf(`\\%s\%s`, c.addr, sharename)
+		if c.host != "" {
+			sharename = fmt.Sprintf(`\\%s\%s`, c.host, sharename)
+		} else {
+			sharename = fmt.Sprintf(`\\%s\%s`, c.addr, sharename)
+		}
 	}
 
 	if err := validateMountPath(sharename); err != nil {
@@ -151,6 +169,9 @@ func (c *Session) Mount(sharename string, opts ...MountOption) (*Share, error) {
 
 func (c *Session) ListSharenames() ([]string, error) {
 	servername := c.addr
+	if c.host != "" {
+		servername = c.host
+	}
 
 	fs, err := c.Mount(fmt.Sprintf(`\\%s\IPC$`, servername))
 	if err != nil {

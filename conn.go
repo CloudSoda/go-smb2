@@ -8,7 +8,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
@@ -320,11 +319,6 @@ func (conn *conn) useSession() bool {
 
 func (conn *conn) enableSession() {
 	atomic.StoreInt32(&conn._useSession, 1)
-}
-
-//nolint:unused // appears to be legacy, unsure, so leaving for now
-func (conn *conn) newTimer() *time.Timer {
-	return time.NewTimer(5 * time.Second)
 }
 
 //nolint:unused // appears to be legacy, unsure, so leaving for now
