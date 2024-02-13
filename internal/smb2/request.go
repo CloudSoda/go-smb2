@@ -1067,7 +1067,6 @@ func (c *IoctlRequest) Encode(pkt []byte) {
 	le.PutUint32(req[4:8], c.CtlCode)
 	c.FileId.Encode(req[8:24])
 	le.PutUint32(req[32:36], c.MaxInputResponse)
-	//le.PutUint32(req[36:40], c.OutputOffset)
 	le.PutUint32(req[40:44], c.OutputCount)
 	le.PutUint32(req[44:48], c.MaxOutputResponse)
 	le.PutUint32(req[48:52], c.Flags)
