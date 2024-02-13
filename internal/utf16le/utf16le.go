@@ -233,3 +233,25 @@ func toSFU(r uint16) uint16 {
 	}
 	return 0
 }
+
+func EncodeString(dst []byte, src string) int {
+	ws := utf16.Encode([]rune(src))
+	for i, w := range ws {
+		le.PutUint16(dst[2*i:2*i+2], w)
+	}
+	return len(ws) * 2
+}
+
+func DecodeToString(bs []byte) string {
+	if len(bs) == 0 {
+		return ""
+	}
+	ws := make([]uint16, len(bs)/2)
+	for i := range ws {
+		ws[i] = le.Uint16(bs[2*i : 2*i+2])
+	}
+	if len(ws) > 0 && ws[len(ws)-1] == 0 {
+		ws = ws[:len(ws)-1]
+	}
+	return string(utf16.Decode(ws))
+}
