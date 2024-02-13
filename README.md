@@ -230,7 +230,7 @@ import (
 	"net"
 	iofs "io/fs"
 
-	"github.com/hirochachacha/go-smb2"
+	"github.com/cloudsoda/go-smb2"
 )
 
 func main() {
