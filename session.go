@@ -55,8 +55,9 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 
 	p := PacketCodec(pkt)
 
-	if erref.NtStatus(p.Status()) != erref.STATUS_MORE_PROCESSING_REQUIRED {
-		return nil, &InvalidResponseError{fmt.Sprintf("expected status: %v, got %v", erref.STATUS_MORE_PROCESSING_REQUIRED, erref.NtStatus(p.Status()))}
+	status := erref.NtStatus(p.Status())
+	if status != erref.STATUS_MORE_PROCESSING_REQUIRED && status != erref.STATUS_SUCCESS {
+		return nil, &InvalidResponseError{fmt.Sprintf("expected status: %v or %v, got %v", erref.STATUS_MORE_PROCESSING_REQUIRED, erref.STATUS_SUCCESS, erref.NtStatus(p.Status()))}
 	}
 
 	res, err := accept(SMB2_SESSION_SETUP, pkt)
@@ -97,10 +98,12 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 			h.Write(rr.pkt)
 			h.Sum(s.preauthIntegrityHashValue[:0])
 
-			h.Reset()
-			h.Write(s.preauthIntegrityHashValue[:])
-			h.Write(pkt)
-			h.Sum(s.preauthIntegrityHashValue[:0])
+			if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
+				h.Reset()
+				h.Write(s.preauthIntegrityHashValue[:])
+				h.Write(pkt)
+				h.Sum(s.preauthIntegrityHashValue[:0])
+			}
 		}
 
 	}
@@ -110,17 +113,19 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 		return nil, &InvalidResponseError{err.Error()}
 	}
 
-	req.SecurityBuffer = outputToken
-
-	req.CreditRequestResponse = 0
-
 	// We set session before sending packet just for setting hdr.SessionId.
 	// But, we should not permit access from receiver until the session information is completed.
 	conn.session = s
 
-	rr, err = s.send(req, ctx)
-	if err != nil {
-		return nil, err
+	if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
+		req.SecurityBuffer = outputToken
+
+		req.CreditRequestResponse = 0
+
+		rr, err = s.send(req, ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if s.sessionFlags&(SMB2_SESSION_FLAG_IS_GUEST|SMB2_SESSION_FLAG_IS_NULL) == 0 {
@@ -162,12 +167,14 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 				return nil, &InternalError{err.Error()}
 			}
 		case SMB311:
-			switch conn.preauthIntegrityHashId {
-			case SHA512:
-				h := sha512.New()
-				h.Write(s.preauthIntegrityHashValue[:])
-				h.Write(rr.pkt)
-				h.Sum(s.preauthIntegrityHashValue[:0])
+			if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
+				switch conn.preauthIntegrityHashId {
+				case SHA512:
+					h := sha512.New()
+					h.Write(s.preauthIntegrityHashValue[:])
+					h.Write(rr.pkt)
+					h.Sum(s.preauthIntegrityHashValue[:0])
+				}
 			}
 
 			signingKey := kdf(sessionKey, []byte("SMBSigningKey\x00"), s.preauthIntegrityHashValue[:])
@@ -224,23 +231,25 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 		}
 	}
 
-	pkt, err = s.recv(rr)
-	if err != nil {
-		return nil, err
-	}
+	if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
+		pkt, err = s.recv(rr)
+		if err != nil {
+			return nil, err
+		}
 
-	res, err = accept(SMB2_SESSION_SETUP, pkt)
-	if err != nil {
-		return nil, err
-	}
+		res, err = accept(SMB2_SESSION_SETUP, pkt)
+		if err != nil {
+			return nil, err
+		}
 
-	r = SessionSetupResponseDecoder(res)
-	if r.IsInvalid() {
-		return nil, &InvalidResponseError{"broken session setup response format"}
-	}
+		r = SessionSetupResponseDecoder(res)
+		if r.IsInvalid() {
+			return nil, &InvalidResponseError{"broken session setup response format"}
+		}
 
-	if erref.NtStatus(PacketCodec(pkt).Status()) != erref.STATUS_SUCCESS {
-		return nil, &InvalidResponseError{"broken session setup response format"}
+		if erref.NtStatus(PacketCodec(pkt).Status()) != erref.STATUS_SUCCESS {
+			return nil, &InvalidResponseError{"broken session setup response format"}
+		}
 	}
 
 	s.sessionFlags = r.SessionFlags()

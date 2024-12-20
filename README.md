@@ -220,3 +220,52 @@ func main() {
 	}
 }
 ```
+
+### Authenticate with Kerberos
+
+> [!NOTE]
+> See [gokrb5 documentation](https://github.com/jcmturner/gokrb5/blob/master/v8/USAGE.md) for more details on how to initialize a Kerberos client.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/cloudsoda/go-smb2"
+	"github.com/jcmturner/gokrb5/v8/client"
+	"github.com/jcmturner/gokrb5/v8/config"
+)
+
+func main() {
+	cfg, err := config.Load("/etc/krb5.conf")
+	if err != nil {
+		panic(err)
+	}
+
+	cl := client.NewWithPassword("USERNAME", "REALM", "PASSWORD", cfg)
+
+	d := &smb2.Dialer{
+		Initiator: &smb2.Krb5Initiator{
+			Client:    cl,
+			TargetSPN: "cifs/SERVERNAME",
+		},
+	}
+
+	s, err := d.Dial(context.Background(), "SERVERNAME:445")
+	if err != nil {
+		panic(err)
+	}
+	defer s.Logoff()
+
+	names, err := s.ListSharenames()
+	if err != nil {
+		panic(err)
+	}
+
+	for _, name := range names {
+		fmt.Println(name)
+	}
+}
+```
