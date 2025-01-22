@@ -34,6 +34,21 @@ const (
 	SACLSecurityInformation SecurityInformationRequestFlags = 0x00000008
 )
 
+type SecurityDescriptorEncoder struct {
+	*sddl.SecurityDescriptor
+}
+
+var _ Encoder = (*SecurityDescriptorEncoder)(nil)
+
+func (se *SecurityDescriptorEncoder) Encode(dest []byte) {
+	data := se.Binary()
+	copy(dest, data)
+}
+
+func (se *SecurityDescriptorEncoder) Size() int {
+	return len(se.Binary())
+}
+
 // Dialer contains options for func (*Dialer) Dial.
 type Dialer struct {
 	MaxCreditBalance uint16 // if it's zero, clientMaxCreditBalance is used. (See feature.go for more details)
@@ -1075,6 +1090,69 @@ func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFla
 	}
 
 	return infoBytes, nil
+}
+
+func (fs *Share) SetSecurityInfo(name string, flags SecurityInformationRequestFlags, sd *sddl.SecurityDescriptor) error {
+	return fs.SetSecurityInfoRaw(name, flags, &SecurityDescriptorEncoder{sd})
+}
+
+func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationRequestFlags, sd Encoder) error {
+	const op = "setsecinfo"
+	name = normPath(name)
+	if err := validatePath(op, name, false); err != nil {
+		return err
+	}
+
+	if flags == 0 {
+		return &os.PathError{
+			Op:   op,
+			Path: name,
+			Err:  fmt.Errorf("%w: one or more SecurityInformation values must be specified", os.ErrInvalid),
+		}
+	}
+
+	// we need to have at least WRITE_DAC to set the security descriptor
+	var access uint32 = WRITE_DAC
+	if flags&SACLSecurityInformation != 0 {
+		access |= ACCESS_SYSTEM_SECURITY
+	}
+	if flags&OwnerSecurityInformation != 0 {
+		access |= WRITE_OWNER
+	}
+
+	creq := &CreateRequest{
+		SecurityFlags:        0,
+		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   Impersonation,
+		SmbCreateFlags:       0,
+		DesiredAccess:        access,
+		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
+		CreateDisposition:    FILE_OPEN,
+		CreateOptions:        0,
+		Mapping:              fs.mapping,
+	}
+
+	f, err := fs.createFile(name, creq, true)
+	if err != nil {
+		return &os.PathError{Op: op, Path: name, Err: fmt.Errorf("calling createFile: %w", err)}
+	}
+	defer f.Close()
+
+	req := &SetInfoRequest{
+		InfoType:              SMB2_0_INFO_SECURITY,
+		FileInfoClass:         0, // Not used for security info
+		AdditionalInformation: uint32(flags),
+		Input:                 sd,
+		FileId:                f.fd,
+	}
+
+	_, err = fs.sendRecv(SMB2_SET_INFO, req)
+	if err != nil {
+		return &os.PathError{Op: op, Path: name, Err: err}
+	}
+
+	return nil
 }
 
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
