@@ -1,8 +1,9 @@
 module github.com/cloudsoda/go-smb2
 
-go 1.20
+go 1.23.3
 
 require (
+	github.com/cloudsoda/sddl v1.0.0
 	github.com/geoffgarside/ber v1.1.0
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/stretchr/testify v1.8.3
@@ -21,3 +22,5 @@ require (
 	golang.org/x/net v0.10.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/cloudsoda/sddl => ../sddl

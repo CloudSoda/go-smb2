@@ -17,6 +17,21 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/msrpc"
 	. "github.com/cloudsoda/go-smb2/internal/smb2"
 	"github.com/cloudsoda/go-smb2/internal/utf16le"
+	"github.com/cloudsoda/sddl"
+)
+
+// SecurityInformationRequestFlags the data that is expected to be returned in Security Information
+type SecurityInformationRequestFlags uint32
+
+const (
+	// OwnerSecurityInformation (OWNER_SECURITY_INFORMATION) requests the owner SID to be returned
+	OwnerSecurityInformation SecurityInformationRequestFlags = 0x00000001
+	// GroupSecurityInformation (GROUP_SECURITY_INFORMATION) requests the group SID to be returned
+	GroupSecurityInformation SecurityInformationRequestFlags = 0x00000002
+	// DACLSecurityInformation (DACL_SECURITY_INFORMATION) requests the DACL to be returned
+	DACLSecurityInformation SecurityInformationRequestFlags = 0x00000004
+	// SACLSecurityInformation (SACL_SECURITY_INFORMATION) requests the SACL to be returned
+	SACLSecurityInformation SecurityInformationRequestFlags = 0x00000008
 )
 
 // Dialer contains options for func (*Dialer) Dial.
@@ -978,9 +993,97 @@ func (fs *Share) Statfs(name string) (FileFsInfo, error) {
 	return fi, nil
 }
 
+// SecurityInfo returns the security descriptor of a file
+func (fs *Share) SecurityInfo(name string, info SecurityInformationRequestFlags) (*sddl.SecurityDescriptor, error) {
+	data, err := fs.SecurityInfoRaw(name, info)
+	if err != nil {
+		return nil, err
+	}
+
+	sd, err := sddl.FromBinary(data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing binary representation of security descriptor: %w", err)
+	}
+
+	return sd, nil
+}
+
+// SecurityInfoRaw returns the raw security descriptor of a file as a byte array
+func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFlags) ([]byte, error) {
+	const op = "secinfo"
+	name = normPath(name)
+	if err := validatePath(op, name, false); err != nil {
+		return nil, err
+	}
+
+	if info == 0 {
+		return nil, &os.PathError{
+			Op:   op,
+			Path: name,
+			Err:  fmt.Errorf("%w: one or more SecurityInformation values must be specified", os.ErrInvalid),
+		}
+	}
+
+	// info should have at least one value
+	if info == 0 {
+		return nil, &os.PathError{
+			Op:   op,
+			Path: name,
+			Err:  fmt.Errorf("%w: one or more SecurityInformation values must be specified", os.ErrInvalid),
+		}
+	}
+
+	// we need to have at least READ_CONTROL in order to get the security descriptor
+	var access uint32 = READ_CONTROL // TODO: create a dedicated type for access mask
+	if info&SACLSecurityInformation != 0 {
+		access |= ACCESS_SYSTEM_SECURITY
+	}
+
+	creq := &CreateRequest{
+		SecurityFlags:        0,
+		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   Impersonation,
+		SmbCreateFlags:       0,
+		DesiredAccess:        access,
+		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          FILE_SHARE_READ,
+		CreateDisposition:    FILE_OPEN,
+		CreateOptions:        0,
+		Mapping:              fs.mapping,
+	}
+
+	f, err := fs.createFile(name, creq, true)
+	if err != nil {
+		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("calling createFile: %w", err)}
+	}
+	defer f.Close() // in case we exit earlier
+
+	req := &QueryInfoRequest{
+		InfoType:              SMB2_0_INFO_SECURITY, // TODO: rename info type constants to be more idiomatic with go
+		FileInfoClass:         0,                    // From the docs: "For security queries, this field MUST be set to 0"
+		OutputBufferLength:    64 * 1024,            // Security descriptors have a max size of 64 KiB on NTFS: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerysecurityobject#remarks
+		AdditionalInformation: uint32(info),
+		Flags:                 0,
+	}
+	infoBytes, err := f.queryInfo(req)
+	if err != nil {
+		return nil, &os.PathError{Op: op, Path: name, Err: err}
+	}
+
+	if err := f.close(); err != nil {
+		return nil, &os.PathError{Op: op, Path: name, Err: err}
+	}
+
+	return infoBytes, nil
+}
+
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
 	if followSymlinks {
-		return fs.createFileRec(name, req)
+		f, err = fs.createFileRec(name, req)
+		if err != nil {
+			return nil, fmt.Errorf("calling createFileRec: %w", err)
+		}
+		return f, nil
 	}
 
 	req.CreditCharge, _, err = fs.loanCredit(0)
@@ -990,14 +1093,14 @@ func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool
 		}
 	}()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("calling loanCredit: %w", err)
 	}
 
 	req.Name = name
 
 	res, err := fs.sendRecv(SMB2_CREATE, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("calling sendRecv: %w", err)
 	}
 
 	r := CreateResponseDecoder(res)
@@ -1019,7 +1122,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 			}
 		}()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("calling loanCredit: %w", err)
 		}
 
 		req.Name = name
@@ -1030,12 +1133,12 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 				if len(rerr.data) > 0 {
 					name, err = evalSymlinkError(req.Name, rerr.data[0], fs.mapping)
 					if err != nil {
-						return nil, err
+						return nil, fmt.Errorf("calling evalSymlinkError: %w", err)
 					}
 					continue
 				}
 			}
-			return nil, err
+			return nil, fmt.Errorf("calling sendRecv SMB2_CREATE: %w", err)
 		}
 
 		r := CreateResponseDecoder(res)
