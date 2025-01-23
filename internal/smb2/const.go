@@ -420,6 +420,19 @@ const (
 // FILE_ATTRIBUTE_NO_SCRUB_DATA       = 0x20000
 )
 
+// Create Context Tags
+const (
+	SMB2_CREATE_EA_BUFFER        = "\x45\x78\x74\x41" // "ExtA"
+	SMB2_CREATE_SD_BUFFER        = "\x53\x65\x63\x44" // "SecD"
+	SMB2_CREATE_DURABLE_HANDLE   = "\x44\x48\x6e\x51" // "DHnQ"
+	SMB2_CREATE_QUERY_MAXIMAL_ACCESS = "\x4d\x78\x41\x63" // "MxAc"
+	SMB2_CREATE_ALLOCATION_SIZE  = "\x41\x6c\x53\x69" // "AlSi"
+	SMB2_CREATE_TIMEWARP_TOKEN   = "\x54\x57\x72\x70" // "TWrp"
+	SMB2_CREATE_QUERY_ON_DISK_ID = "\x51\x46\x69\x64" // "QFid"
+	SMB2_CREATE_REQUEST_LEASE    = "\x52\x71\x4c\x73" // "RqLs"
+	SMB2_CREATE_QUERY_SD        = "\x51\x53\x65\x63" // "QSec"
+)
+
 // ----------------------------------------------------------------------------
 // SMB2 CLOSE Request and Response
 //

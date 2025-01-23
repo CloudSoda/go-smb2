@@ -1,6 +1,7 @@
 package smb2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -350,7 +351,7 @@ func (fs *Share) newFile(r CreateResponseDecoder, name string) *File {
 		FileName:       base(name),
 	}
 
-	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat, mapping: fs.mapping}
+	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat, mapping: fs.mapping, createContextDecoders: r.CreateContexts()}
 
 	runtime.SetFinalizer(f, (*File).close)
 
@@ -1139,6 +1140,67 @@ func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationReques
 	return nil
 }
 
+func (fs *Share) SecurityInfoRaw2(name string, info SecurityInformationRequestFlags) ([]byte, error) {
+	const op = "secinfo2"
+	name = normPath(name)
+	if err := validatePath(op, name, false); err != nil {
+		return nil, err
+	}
+
+	if info == 0 {
+		return nil, &os.PathError{
+			Op:   op,
+			Path: name,
+			Err:  fmt.Errorf("%w: one or more SecurityInformation values must be specified", os.ErrInvalid),
+		}
+	}
+
+	// we need to have at least READ_CONTROL in order to get the security descriptor
+	var access uint32 = READ_CONTROL // TODO: create a dedicated type for access mask
+	if info&SACLSecurityInformation != 0 {
+		access |= ACCESS_SYSTEM_SECURITY
+	}
+
+	// Create the security descriptor query context
+	sdContext := &QuerySecurityDescriptorContext{
+		SecurityInformation: uint32(info),
+	}
+
+	creq := &CreateRequest{
+		SecurityFlags:        0,
+		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   Impersonation,
+		SmbCreateFlags:       0,
+		DesiredAccess:        access,
+		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          FILE_SHARE_READ,
+		CreateDisposition:    FILE_OPEN,
+		CreateOptions:        0,
+		Name:                 name,
+		Mapping:              fs.mapping,
+		Contexts:             []Encoder{sdContext},
+	}
+
+	f, err := fs.createFile(name, creq, true)
+	if err != nil {
+		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("calling createFile: %w", err)}
+	}
+	defer f.Close()
+
+	// The security descriptor will be in the create response contexts
+	if len(f.createContextDecoders) == 0 {
+		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("create contexts not found in response")}
+	}
+
+	for _, ctx := range f.createContextDecoders {
+		if bytes.Equal(ctx.Name(), []byte(SMB2_CREATE_QUERY_SD)) {
+			return ctx.Data(), nil
+		}
+	}
+
+	return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("security descriptor not found in response")}
+}
+
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
 	if followSymlinks {
 		f, err = fs.createFileRec(name, req)
@@ -1271,6 +1333,8 @@ type File struct {
 	mapping     utf16le.MapChars
 
 	offset int64
+
+	createContextDecoders []CreateContextDecoder
 
 	m sync.Mutex
 }

@@ -745,6 +745,74 @@ func (r TreeDisconnectResponseDecoder) StructureSize() uint16 {
 // SMB2 CREATE Response
 //
 
+type CreateResponseContext struct {
+	tag  string
+	Data []byte
+}
+
+func (c *CreateResponseContext) Tag() string {
+	return c.tag
+}
+
+// Size returns the total size of the context structure including:
+// - 4 bytes for Next offset
+// - 2 bytes for NameOffset
+// - 2 bytes for NameLength
+// - 2 bytes for Reserved
+// - 2 bytes for DataOffset
+// - 4 bytes for DataLength
+// - 4 bytes for name (aligned to 8 bytes)
+// - N bytes for data (aligned to 8 bytes)
+func (c *CreateResponseContext) Size() int {
+	nameLen := 4 // Fixed 4-byte tag name
+	dataLen := len(c.Data)
+
+	// Base structure size (16 bytes)
+	size := 16
+
+	// Name field (aligned to 8 bytes)
+	size += Roundup(nameLen, 8)
+
+	// Data field (aligned to 8 bytes)
+	if dataLen > 0 {
+		size += Roundup(dataLen, 8)
+	}
+
+	return size
+}
+
+// Encode writes the create context structure to the provided buffer
+// Buffer must be at least Size() bytes
+func (c *CreateResponseContext) Encode(b []byte) {
+	nameLen := 4 // Fixed 4-byte tag name
+	dataLen := len(c.Data)
+
+	// Next offset will be set by the caller
+	le.PutUint32(b[0:4], 0)
+
+	// Name offset is always 16 (after fixed header)
+	le.PutUint16(b[4:6], 16)
+	le.PutUint16(b[6:8], uint16(nameLen))
+
+	// Reserved field
+	le.PutUint16(b[8:10], 0)
+
+	// Data offset starts after name (aligned to 8 bytes)
+	dataOffset := uint16(16 + Roundup(nameLen, 8))
+	le.PutUint16(b[10:12], dataOffset)
+
+	// Data length
+	le.PutUint32(b[12:16], uint32(dataLen))
+
+	// Write name (tag)
+	copy(b[16:16+nameLen], []byte(c.tag))
+
+	// Write data if present
+	if dataLen > 0 {
+		copy(b[dataOffset:dataOffset+uint16(dataLen)], c.Data)
+	}
+}
+
 type CreateResponse struct {
 	PacketHeader
 
@@ -759,8 +827,7 @@ type CreateResponse struct {
 	EndofFile      int64
 	FileAttributes uint32
 	FileId         *FileId
-
-	Contexts []Encoder
+	Contexts       []*CreateResponseContext
 }
 
 func (c *CreateResponse) Header() *PacketHeader {
@@ -906,18 +973,68 @@ func (r CreateResponseDecoder) CreateContextsLength() uint32 {
 	return le.Uint32(r[84:88])
 }
 
-// func (r CreateResponseDecoder) Buffer() []byte {
-// return r[88:]
-// }
-
-func (r CreateResponseDecoder) CreateContexts() []byte {
+func (r CreateResponseDecoder) CreateContexts() []CreateContextDecoder {
 	off := r.CreateContextsOffset()
-	if off < 88+64 {
+	if off < 88+64 { // must be beyond header + base offset
 		return nil
 	}
-	off -= 64
+	off -= 64 // adjust for base offset
 	len := r.CreateContextsLength()
-	return r[off : off+len]
+	if len == 0 {
+		return nil
+	}
+
+	decoders := make([]CreateContextDecoder, len)
+	for i := range decoders {
+		decoders[i] = CreateContextDecoder(r[off:])
+		off += decoders[i].Next()
+	}
+
+	return decoders
+}
+
+type CreateContextDecoder []byte
+
+func (c CreateContextDecoder) IsInvalid() bool {
+	return len(c) < 16 // minimum size of context header
+}
+
+func (c CreateContextDecoder) Next() uint32 {
+	return le.Uint32(c[0:4])
+}
+
+func (c CreateContextDecoder) NameOffset() uint16 {
+	return le.Uint16(c[4:6])
+}
+
+func (c CreateContextDecoder) NameLength() uint16 {
+	return le.Uint16(c[6:8])
+}
+
+func (c CreateContextDecoder) DataOffset() uint16 {
+	return le.Uint16(c[10:12])
+}
+
+func (c CreateContextDecoder) DataLength() uint32 {
+	return le.Uint32(c[12:16])
+}
+
+func (c CreateContextDecoder) Name() []byte {
+	offset := c.NameOffset()
+	length := c.NameLength()
+	if offset == 0 || length == 0 {
+		return nil
+	}
+	return c[offset : offset+length]
+}
+
+func (c CreateContextDecoder) Data() []byte {
+	offset := c.DataOffset()
+	length := c.DataLength()
+	if offset == 0 || length == 0 {
+		return nil
+	}
+	return c[offset : offset+uint16(length)]
 }
 
 // ----------------------------------------------------------------------------

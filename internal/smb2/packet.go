@@ -1,5 +1,7 @@
 package smb2
 
+import "errors"
+
 // ----------------------------------------------------------------------------
 // SMB2 Packet Header
 //
@@ -45,6 +47,33 @@ func (hdr *PacketHeader) encodeHeader(pkt []byte) {
 	}
 
 	p.SetSessionId(hdr.SessionId)
+}
+
+func (hdr *PacketHeader) decodeHeader(pkt []byte) error {
+	p := PacketCodec(pkt)
+
+	if p.IsInvalid() {
+		return errors.New("packet header is invalid")
+	}
+
+	hdr.CreditCharge = p.CreditCharge()
+	if p.ChannelSequence() != 0 {
+		hdr.ChannelSequence = p.ChannelSequence()
+	} else {
+		hdr.Status = p.Status()
+	}
+	hdr.Command = p.Command()
+	hdr.CreditRequestResponse = p.CreditResponse()
+	hdr.Flags = p.Flags()
+	hdr.MessageId = p.MessageId()
+	if p.TreeId() != 0 {
+		hdr.TreeId = p.TreeId()
+	} else {
+		hdr.AsyncId = p.AsyncId()
+	}
+	hdr.SessionId = p.SessionId()
+
+	return nil
 }
 
 // ----------------------------------------------------------------------------

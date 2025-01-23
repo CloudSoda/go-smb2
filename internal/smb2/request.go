@@ -597,6 +597,41 @@ func (r CreateRequestDecoder) CreateContextsLength() uint32 {
 	return le.Uint32(r[52:56])
 }
 
+// CreateContext represents an SMB2 CREATE_CONTEXT structure
+type CreateContext struct {
+	Next       uint32 // Offset to next context, 0 if this is the last one
+	NameOffset uint16
+	NameLength uint16
+	Reserved   uint16
+	DataOffset uint16
+	DataLength uint32
+	Name       []byte // Buffer containing context name
+	Data       []byte // Buffer containing context data
+}
+
+// CreateContextEncoder is the interface for objects that can be encoded as create contexts
+type CreateContextEncoder interface {
+	Encoder
+	Tag() string // Returns the context tag (e.g. "QSec")
+}
+
+// QuerySecurityDescriptorContext represents a security descriptor query context
+type QuerySecurityDescriptorContext struct {
+	SecurityInformation uint32
+}
+
+func (c *QuerySecurityDescriptorContext) Size() int {
+	return 4 // size of SecurityInformation
+}
+
+func (c *QuerySecurityDescriptorContext) Tag() string {
+	return SMB2_CREATE_QUERY_SD
+}
+
+func (c *QuerySecurityDescriptorContext) Encode(b []byte) {
+	le.PutUint32(b[:4], c.SecurityInformation)
+}
+
 // ----------------------------------------------------------------------------
 // SMB2 CLOSE Request Packet
 //
