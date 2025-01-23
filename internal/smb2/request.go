@@ -469,6 +469,7 @@ func (c *CreateRequest) Encode(pkt []byte) {
 	req[3] = c.RequestedOplockLevel
 	le.PutUint32(req[4:8], c.ImpersonationLevel)
 	le.PutUint64(req[8:16], c.SmbCreateFlags)
+	le.PutUint64(req[16:24], 0) // Reserved
 	le.PutUint32(req[24:28], c.DesiredAccess)
 	le.PutUint32(req[28:32], c.FileAttributes)
 	le.PutUint32(req[32:36], c.ShareAccess)
@@ -478,8 +479,8 @@ func (c *CreateRequest) Encode(pkt []byte) {
 	// Name
 	nlen := utf16le.EncodeSlice(req[56:], c.Name, c.Mapping)
 
-	le.PutUint16(req[44:46], 56+64)
-	le.PutUint16(req[46:48], uint16(nlen))
+	le.PutUint16(req[44:46], 56+64)        // NameOffset
+	le.PutUint16(req[46:48], uint16(nlen)) // NameLength
 
 	off := 56 + nlen
 
@@ -492,7 +493,7 @@ func (c *CreateRequest) Encode(pkt []byte) {
 		if i == 0 {
 			le.PutUint32(req[48:52], uint32(64+off)) // CreateContextsOffset
 		} else {
-			le.PutUint32(ctx[:4], uint32(next)) // Next
+			le.PutUint32(ctx[:4], uint32(next)) // Next Offset relative to current context
 		}
 
 		ctx = req[off:]
@@ -620,16 +621,34 @@ type QuerySecurityDescriptorContext struct {
 	SecurityInformation uint32
 }
 
-func (c *QuerySecurityDescriptorContext) Size() int {
-	return 4 // size of SecurityInformation
+type QuerySDContext struct {
+	*QuerySecurityDescriptorContext
 }
 
-func (c *QuerySecurityDescriptorContext) Tag() string {
+func (c *QuerySDContext) Size() int {
+	return 16 + // header size
+		8 + // name size (rounded to 8)
+		8 // data size (rounded to 8)
+}
+
+func (c *QuerySDContext) Tag() string {
 	return SMB2_CREATE_QUERY_SD
 }
 
-func (c *QuerySecurityDescriptorContext) Encode(b []byte) {
-	le.PutUint32(b[:4], c.SecurityInformation)
+func (c *QuerySDContext) Encode(b []byte) {
+	// Header
+	le.PutUint32(b[0:4], 0)                                 // Next (0 since we only have one context)
+	le.PutUint16(b[4:6], 16)                                // NameOffset (fixed at 16)
+	le.PutUint16(b[6:8], uint16(len(SMB2_CREATE_QUERY_SD))) // NameLength
+	le.PutUint16(b[8:10], 0)                                // Reserved
+	le.PutUint16(b[10:12], uint16(16+8))                    // DataOffset (after name, aligned to 8)
+	le.PutUint32(b[12:16], 4)                               // DataLength (4 bytes for SecurityInformation)
+
+	// Name
+	copy(b[16:], []byte(SMB2_CREATE_QUERY_SD))
+
+	// Data (SecurityInformation)
+	le.PutUint32(b[24:28], c.SecurityInformation)
 }
 
 // ----------------------------------------------------------------------------

@@ -1178,7 +1178,7 @@ func (fs *Share) SecurityInfoRaw2(name string, info SecurityInformationRequestFl
 		CreateOptions:        0,
 		Name:                 name,
 		Mapping:              fs.mapping,
-		Contexts:             []Encoder{sdContext},
+		Contexts:             []Encoder{&QuerySDContext{QuerySecurityDescriptorContext: sdContext}},
 	}
 
 	f, err := fs.createFile(name, creq, true)
