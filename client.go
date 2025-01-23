@@ -1658,6 +1658,11 @@ func (f *File) chmod(mode os.FileMode) error {
 		attrs |= FILE_ATTRIBUTE_READONLY
 	}
 
+	// If the file is not a directory, we have to set the normal attribute.
+	if attrs&FILE_ATTRIBUTE_DIRECTORY == 0 {
+		attrs |= FILE_ATTRIBUTE_NORMAL
+	}
+
 	info := &SetInfoRequest{
 		FileInfoClass:         FileBasicInformation,
 		AdditionalInformation: 0,
