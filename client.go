@@ -1073,23 +1073,7 @@ func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFla
 	}
 	defer f.Close() // in case we exit earlier
 
-	req := &QueryInfoRequest{
-		InfoType:              SMB2_0_INFO_SECURITY, // TODO: rename info type constants to be more idiomatic with go
-		FileInfoClass:         0,                    // From the docs: "For security queries, this field MUST be set to 0"
-		OutputBufferLength:    64 * 1024,            // Security descriptors have a max size of 64 KiB on NTFS: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerysecurityobject#remarks
-		AdditionalInformation: uint32(info),
-		Flags:                 0,
-	}
-	infoBytes, err := f.queryInfo(req)
-	if err != nil {
-		return nil, &os.PathError{Op: op, Path: name, Err: err}
-	}
-
-	if err := f.close(); err != nil {
-		return nil, &os.PathError{Op: op, Path: name, Err: err}
-	}
-
-	return infoBytes, nil
+	return f.SecurityInfoRaw(info)
 }
 
 func (fs *Share) SetSecurityInfo(name string, flags SecurityInformationRequestFlags, sd *sddl.SecurityDescriptor) error {
@@ -2292,6 +2276,27 @@ func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
 	}
 
 	return r.OutputBuffer(), nil
+}
+
+func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, error) {
+	op := "secinfo"
+	req := &QueryInfoRequest{
+		InfoType:              SMB2_0_INFO_SECURITY, // TODO: rename info type constants to be more idiomatic with go
+		FileInfoClass:         0,                    // From the docs: "For security queries, this field MUST be set to 0"
+		OutputBufferLength:    64 * 1024,            // Security descriptors have a max size of 64 KiB on NTFS: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerysecurityobject#remarks
+		AdditionalInformation: uint32(info),
+		Flags:                 0,
+	}
+	infoBytes, err := f.queryInfo(req)
+	if err != nil {
+		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
+	}
+
+	if err := f.close(); err != nil {
+		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
+	}
+
+	return infoBytes, nil
 }
 
 func (f *File) setInfo(req *SetInfoRequest) (err error) {
