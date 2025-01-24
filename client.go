@@ -523,9 +523,8 @@ func (fs *Share) remove(name string) error {
 		FileAttributes:       0,
 		ShareAccess:          FILE_SHARE_DELETE,
 		CreateDisposition:    FILE_OPEN,
-		// CreateOptions:        FILE_OPEN_REPARSE_POINT | FILE_DELETE_ON_CLOSE,
-		CreateOptions: FILE_OPEN_REPARSE_POINT,
-		Mapping:       fs.mapping,
+		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		Mapping:              fs.mapping,
 	}
 	// FILE_DELETE_ON_CLOSE doesn't work for reparse point, so use FileDispositionInformation instead
 
@@ -1657,6 +1656,11 @@ func (f *File) chmod(mode os.FileMode) error {
 		attrs &^= FILE_ATTRIBUTE_READONLY
 	} else {
 		attrs |= FILE_ATTRIBUTE_READONLY
+	}
+
+	// If the file is not a directory, we have to set the normal attribute.
+	if attrs&FILE_ATTRIBUTE_DIRECTORY == 0 {
+		attrs |= FILE_ATTRIBUTE_NORMAL
 	}
 
 	info := &SetInfoRequest{

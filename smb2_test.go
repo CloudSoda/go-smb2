@@ -56,15 +56,19 @@ type config struct {
 	TreeConn         treeConnConfig  `json:"tree_conn"`
 }
 
-var cfg config
-var fs *smb2.Share
-var rfs *smb2.Share
+var (
+	cfg     config
+	fs      *smb2.Share
+	fsName  string
+	rfs     *smb2.Share
+	rfsName string
 
-// services for mac ()
-var sfmFS *smb2.Share
-var sfuFS *smb2.Share
-var session *smb2.Session
-var dialer *smb2.Dialer
+	// services for mac ()
+	sfmFS   *smb2.Share
+	sfuFS   *smb2.Share
+	session *smb2.Session
+	dialer  *smb2.Dialer
+)
 
 func connect(f func()) {
 	{
@@ -112,7 +116,8 @@ func connect(f func()) {
 			_ = c.Logoff()
 		}()
 
-		fs1, err := c.Mount(cfg.TreeConn.Share1)
+		fsName = cfg.TreeConn.Share1
+		fs1, err := c.Mount(fsName)
 		if err != nil {
 			panic(err)
 		}
@@ -120,7 +125,8 @@ func connect(f func()) {
 			_ = fs1.Umount()
 		}()
 
-		fs2, err := c.Mount(cfg.TreeConn.Share2)
+		rfsName = cfg.TreeConn.Share2
+		fs2, err := c.Mount(rfsName)
 		if err != nil {
 			panic(err)
 		}
@@ -128,7 +134,7 @@ func connect(f func()) {
 			_ = fs2.Umount()
 		}()
 
-		sfmFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapPosix())
+		sfmFS, err = c.Mount(fsName, smb2.WithMapPosix())
 		if err != nil {
 			panic(err)
 		}
@@ -136,7 +142,7 @@ func connect(f func()) {
 			_ = sfmFS.Umount()
 		}()
 
-		sfuFS, err = c.Mount(cfg.TreeConn.Share1, smb2.WithMapChars())
+		sfuFS, err = c.Mount(fsName, smb2.WithMapChars())
 		if err != nil {
 			panic(err)
 		}
@@ -734,7 +740,7 @@ func TestListSharenames(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Strings(names)
-	for _, expected := range []string{"IPC$", "tmp", "tmp2"} {
+	for _, expected := range []string{fsName, rfsName} {
 		found := false
 		for _, name := range names {
 			if name == expected {
