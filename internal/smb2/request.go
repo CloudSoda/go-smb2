@@ -598,59 +598,6 @@ func (r CreateRequestDecoder) CreateContextsLength() uint32 {
 	return le.Uint32(r[52:56])
 }
 
-// CreateContext represents an SMB2 CREATE_CONTEXT structure
-type CreateContext struct {
-	Next       uint32 // Offset to next context, 0 if this is the last one
-	NameOffset uint16
-	NameLength uint16
-	Reserved   uint16
-	DataOffset uint16
-	DataLength uint32
-	Name       []byte // Buffer containing context name
-	Data       []byte // Buffer containing context data
-}
-
-// CreateContextEncoder is the interface for objects that can be encoded as create contexts
-type CreateContextEncoder interface {
-	Encoder
-	Tag() string // Returns the context tag (e.g. "QSec")
-}
-
-// QuerySecurityDescriptorContext represents a security descriptor query context
-type QuerySecurityDescriptorContext struct {
-	SecurityInformation uint32
-}
-
-type QuerySDContext struct {
-	*QuerySecurityDescriptorContext
-}
-
-func (c *QuerySDContext) Size() int {
-	return 16 + // header size
-		8 + // name size (rounded to 8)
-		8 // data size (rounded to 8)
-}
-
-func (c *QuerySDContext) Tag() string {
-	return SMB2_CREATE_QUERY_SD
-}
-
-func (c *QuerySDContext) Encode(b []byte) {
-	// Header
-	le.PutUint32(b[0:4], 0)                                 // Next (0 since we only have one context)
-	le.PutUint16(b[4:6], 16)                                // NameOffset (fixed at 16)
-	le.PutUint16(b[6:8], uint16(len(SMB2_CREATE_QUERY_SD))) // NameLength
-	le.PutUint16(b[8:10], 0)                                // Reserved
-	le.PutUint16(b[10:12], uint16(16+8))                    // DataOffset (after name, aligned to 8)
-	le.PutUint32(b[12:16], 4)                               // DataLength (4 bytes for SecurityInformation)
-
-	// Name
-	copy(b[16:], []byte(SMB2_CREATE_QUERY_SD))
-
-	// Data (SecurityInformation)
-	le.PutUint32(b[24:28], c.SecurityInformation)
-}
-
 // ----------------------------------------------------------------------------
 // SMB2 CLOSE Request Packet
 //
