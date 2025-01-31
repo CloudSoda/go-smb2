@@ -1,6 +1,27 @@
 package smb2
 
+import (
+	"io"
+	"log"
+	"os"
+)
+
 var zero [16]byte
+
+// TODO: remove me
+var debug = os.Getenv("DEBUG") != ""
+
+var logger *log.Logger
+
+func init() {
+	if debug {
+		logger = log.New(os.Stderr, "smb2: ", log.LstdFlags)
+	} else {
+		logger = log.New(io.Discard, "smb2: ", log.LstdFlags)
+	}
+}
+
+// TODO: /end remove me
 
 // ----------------------------------------------------------------------------
 // SMB2 FILEID

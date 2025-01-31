@@ -395,14 +395,17 @@ type NegotiateResponseDecoder []byte
 
 func (r NegotiateResponseDecoder) IsInvalid() bool {
 	if len(r) < 64 {
+		logger.Printf("NegotiateResponseDecoder.IsInvalid: len=%d < 64", len(r))
 		return true
 	}
 
 	if r.StructureSize() != 65 {
+		logger.Printf("NegotiateResponseDecoder.IsInvalid: StructureSize=%d != 65", r.StructureSize())
 		return true
 	}
 
 	if len(r) < int(r.SecurityBufferOffset()+r.SecurityBufferLength())-64 {
+		logger.Printf("NegotiateResponseDecoder.IsInvalid: len=%d < int(r.SecurityBufferOffset()=%d+r.SecurityBufferLength()=%d)-64", len(r), r.SecurityBufferOffset(), r.SecurityBufferLength())
 		return true
 	}
 
@@ -410,10 +413,12 @@ func (r NegotiateResponseDecoder) IsInvalid() bool {
 		noff := r.NegotiateContextOffset()
 
 		if noff&7 != 0 {
+			logger.Printf("NegotiateResponseDecoder.IsInvalid: noff=%b&7 != 0", noff)
 			return true
 		}
 
 		if len(r) < int(noff)-64 {
+			logger.Printf("NegotiateResponseDecoder.IsInvalid: len=%d < int(noff=%d)-64", len(r), noff)
 			return true
 		}
 	}
@@ -545,14 +550,17 @@ type SessionSetupResponseDecoder []byte
 
 func (r SessionSetupResponseDecoder) IsInvalid() bool {
 	if len(r) < 8 {
+		logger.Printf("SessionSetupResponseDecoder.IsInvalid: len=%d < 8", len(r))
 		return true
 	}
 
 	if r.StructureSize() != 9 {
+		logger.Printf("SessionSetupResponseDecoder.IsInvalid: StructureSize=%d != 9", r.StructureSize())
 		return true
 	}
 
 	if len(r) < int(r.SecurityBufferOffset()+r.SecurityBufferLength())-64 {
+		logger.Printf("SessionSetupResponseDecoder.IsInvalid: len=%d < int(r.SecurityBufferOffset()=%d+r.SecurityBufferLength()=%d)-64", len(r), r.SecurityBufferOffset(), r.SecurityBufferLength())
 		return true
 	}
 
