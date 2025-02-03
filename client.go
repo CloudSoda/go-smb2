@@ -1164,6 +1164,10 @@ func (fs *Share) SecurityInfoRaw2(name string, info SecurityInformationRequestFl
 		}
 	}
 
+	if fs.conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
+		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("expecting SMB2_GLOBAL_CAP_LARGE_MTU feature to be supported")}
+	}
+
 	// we need to have at least READ_CONTROL in order to get the security descriptor
 	var access uint32 = READ_CONTROL // TODO: create a dedicated type for access mask
 	if info&SACLSecurityInformation != 0 {
