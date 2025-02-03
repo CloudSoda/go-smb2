@@ -6,10 +6,10 @@ jobs:
         go: [1.23.3]
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - run: |
         sudo apt update
         sudo apt install -y samba
@@ -18,7 +18,7 @@ jobs:
         (echo Smbpasswd12345; echo Smbpasswd12345) | sudo smbpasswd -a -s smbuser
         sudo cp ./.github/smb.conf /etc/samba/smb.conf
         sudo smbd
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       with:
         path: |
           ~/go/pkg/mod
@@ -30,7 +30,7 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
-    - uses: golangci/golangci-lint-action@v3
+    - uses: golangci/golangci-lint-action@v6
       with:
         version: v1.52.2
         skip-cache: true
@@ -41,16 +41,16 @@ jobs:
         go: [1.23.3]
     runs-on: windows-2022
     steps:
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - run: |
         mkdir C:\tmp
         net user smbuser Smbpasswd12345 /add
         net share tmp="C:\tmp" /GRANT:smbuser,full
         net share tmp2="C:\tmp" /GRANT:smbuser,read
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       with:
         path: |
           ~/go/pkg/mod
@@ -62,7 +62,7 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
-    - uses: golangci/golangci-lint-action@v3
+    - uses: golangci/golangci-lint-action@v6
       with:
         version: v1.52.2
         skip-cache: true
