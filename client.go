@@ -1128,11 +1128,7 @@ func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationReques
 
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
 	if followSymlinks {
-		f, err = fs.createFileRec(name, req)
-		if err != nil {
-			return nil, fmt.Errorf("calling createFileRec: %w", err)
-		}
-		return f, nil
+		return fs.createFileRec(name, req)
 	}
 
 	req.CreditCharge, _, err = fs.loanCredit(0)
@@ -1142,14 +1138,14 @@ func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool
 		}
 	}()
 	if err != nil {
-		return nil, fmt.Errorf("calling loanCredit: %w", err)
+		return nil, err
 	}
 
 	req.Name = name
 
 	res, err := fs.sendRecv(SMB2_CREATE, req)
 	if err != nil {
-		return nil, fmt.Errorf("calling sendRecv: %w", err)
+		return nil, err
 	}
 
 	r := CreateResponseDecoder(res)
@@ -1171,7 +1167,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 			}
 		}()
 		if err != nil {
-			return nil, fmt.Errorf("calling loanCredit: %w", err)
+			return nil, err
 		}
 
 		req.Name = name
@@ -1182,12 +1178,12 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 				if len(rerr.data) > 0 {
 					name, err = evalSymlinkError(req.Name, rerr.data[0], fs.mapping)
 					if err != nil {
-						return nil, fmt.Errorf("calling evalSymlinkError: %w", err)
+						return nil, err
 					}
 					continue
 				}
 			}
-			return nil, fmt.Errorf("calling sendRecv SMB2_CREATE: %w", err)
+			return nil, err
 		}
 
 		r := CreateResponseDecoder(res)
