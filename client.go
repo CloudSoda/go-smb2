@@ -1123,20 +1123,7 @@ func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationReques
 	}
 	defer f.Close()
 
-	req := &SetInfoRequest{
-		InfoType:              SMB2_0_INFO_SECURITY,
-		FileInfoClass:         0, // Not used for security info
-		AdditionalInformation: uint32(flags),
-		Input:                 sd,
-		FileId:                f.fd,
-	}
-
-	_, err = fs.sendRecv(SMB2_SET_INFO, req)
-	if err != nil {
-		return &os.PathError{Op: op, Path: name, Err: err}
-	}
-
-	return nil
+	return f.SetSecurityInfoRaw(flags, sd)
 }
 
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
@@ -2278,6 +2265,20 @@ func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
 	return r.OutputBuffer(), nil
 }
 
+func (f *File) SecurityInfo(flags SecurityInformationRequestFlags) (*sddl.SecurityDescriptor, error) {
+	data, err := f.SecurityInfoRaw(flags)
+	if err != nil {
+		return nil, err
+	}
+
+	sd, err := sddl.FromBinary(data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing binary representation of security descriptor: %w", err)
+	}
+
+	return sd, nil
+}
+
 func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, error) {
 	op := "secinfo"
 	req := &QueryInfoRequest{
@@ -2297,6 +2298,40 @@ func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, er
 	}
 
 	return infoBytes, nil
+}
+
+func (f *File) SetSecurityInfo(flags SecurityInformationRequestFlags, sd *sddl.SecurityDescriptor) error {
+	return f.SetSecurityInfoRaw(flags, &SecurityDescriptorEncoder{sd})
+}
+
+func (f *File) SetSecurityInfoRaw(flags SecurityInformationRequestFlags, sd Encoder) error {
+	op := "setsecinfo"
+
+	req := &SetInfoRequest{
+		InfoType:              SMB2_0_INFO_SECURITY,
+		FileInfoClass:         0, // Not used for security info
+		AdditionalInformation: uint32(flags),
+		Input:                 sd,
+		FileId:                f.fd,
+	}
+
+	var err error
+	req.CreditCharge, _, err = f.fs.loanCredit(req.Size())
+	defer func() {
+		if err != nil {
+			f.fs.chargeCredit(req.CreditCharge)
+		}
+	}()
+	if err != nil {
+		return fmt.Errorf("calling loanCredit: %w", err)
+	}
+
+	_, err = f.sendRecv(SMB2_SET_INFO, req)
+	if err != nil {
+		return &os.PathError{Op: op, Path: f.name, Err: err}
+	}
+
+	return nil
 }
 
 func (f *File) setInfo(req *SetInfoRequest) (err error) {
