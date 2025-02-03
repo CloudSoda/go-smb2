@@ -48,24 +48,24 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 		return nil, err
 	}
 
-	pkts, err := conn.recv(rr)
+	pkt, err := conn.recv(rr)
 	if err != nil {
 		return nil, err
 	}
 
-	p := PacketCodec(pkts[0])
+	p := PacketCodec(pkt)
 
 	status := erref.NtStatus(p.Status())
 	if status != erref.STATUS_MORE_PROCESSING_REQUIRED && status != erref.STATUS_SUCCESS {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected status: %v or %v, got %v", erref.STATUS_MORE_PROCESSING_REQUIRED, erref.STATUS_SUCCESS, erref.NtStatus(p.Status()))}
 	}
 
-	res, err := accept(pkts, SMB2_SESSION_SETUP)
+	res, err := accept(SMB2_SESSION_SETUP, pkt)
 	if err != nil {
 		return nil, err
 	}
 
-	r := SessionSetupResponseDecoder(res[0])
+	r := SessionSetupResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken session setup response format"}
 	}
@@ -101,7 +101,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 			if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
 				h.Reset()
 				h.Write(s.preauthIntegrityHashValue[:])
-				h.Write(pkts[0])
+				h.Write(pkt)
 				h.Sum(s.preauthIntegrityHashValue[:0])
 			}
 		}
@@ -232,25 +232,22 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 	}
 
 	if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
-		pkts, err = s.recv(rr)
+		pkt, err = s.recv(rr)
 		if err != nil {
 			return nil, err
 		}
 
-		res, err = accept(pkts, SMB2_SESSION_SETUP)
+		res, err = accept(SMB2_SESSION_SETUP, pkt)
 		if err != nil {
 			return nil, err
 		}
-		if len(res) == 0 {
-			return nil, &InvalidResponseError{"unexpected empty response"}
-		}
 
-		r = SessionSetupResponseDecoder(res[0])
+		r = SessionSetupResponseDecoder(res)
 		if r.IsInvalid() {
 			return nil, &InvalidResponseError{"broken session setup response format"}
 		}
 
-		if erref.NtStatus(PacketCodec(pkts[0]).Status()) != erref.STATUS_SUCCESS {
+		if erref.NtStatus(PacketCodec(pkt).Status()) != erref.STATUS_SUCCESS {
 			return nil, &InvalidResponseError{"broken session setup response format"}
 		}
 	}
@@ -283,7 +280,7 @@ func (s *session) logoff(ctx context.Context) error {
 
 	req.CreditCharge = 1
 
-	_, err := s.sendRecv(ctx, req, SMB2_LOGOFF)
+	_, err := s.sendRecv(SMB2_LOGOFF, req, ctx)
 	if err != nil {
 		return err
 	}
@@ -294,32 +291,29 @@ func (s *session) logoff(ctx context.Context) error {
 	return nil
 }
 
-func (s *session) sendRecv(ctx context.Context, req Packet, cmds ...uint16) (res [][]byte, err error) {
+func (s *session) sendRecv(cmd uint16, req Packet, ctx context.Context) (res []byte, err error) {
 	rr, err := s.send(req, ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	pkts, err := s.recv(rr)
+	pkt, err := s.recv(rr)
 	if err != nil {
 		return nil, err
 	}
 
-	return accept(pkts, cmds...)
+	return accept(cmd, pkt)
 }
 
-func (s *session) recv(rr *requestResponse) (pkts [][]byte, err error) {
-	pkts, err = s.conn.recv(rr)
+func (s *session) recv(rr *requestResponse) (pkt []byte, err error) {
+	pkt, err = s.conn.recv(rr)
 	if err != nil {
 		return nil, err
 	}
-	if len(pkts) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
-	if sessionId := PacketCodec(pkts[0]).SessionId(); sessionId != s.sessionId {
+	if sessionId := PacketCodec(pkt).SessionId(); sessionId != s.sessionId {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected session id: %v, got %v", s.sessionId, sessionId)}
 	}
-	return pkts, err
+	return pkt, err
 }
 
 func (s *session) sign(pkt []byte) []byte {

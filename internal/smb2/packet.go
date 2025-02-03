@@ -1,38 +1,8 @@
 package smb2
 
-import (
-	"errors"
-)
-
 // ----------------------------------------------------------------------------
 // SMB2 Packet Header
 //
-
-// Option type for encodeHeader options
-type HeaderOption func(PacketCodec)
-
-// WithNextCommand creates an option to set the next command offset
-func WithNextCommand(offset uint32) HeaderOption {
-	return func(p PacketCodec) {
-		p.SetNextCommand(offset)
-	}
-}
-
-// SetDependentCompoundRequest sets in flags that this packet depends on previous packet in a compound request
-func SetDependentCompoundRequest() HeaderOption {
-	return func(p PacketCodec) {
-		p.SetFlags(p.Flags() | SMB2_FLAGS_RELATED_OPERATIONS)
-	}
-}
-
-// ComposeHeaderOptions composes a header option function from several options
-func ComposeHeaderOptions(opts ...HeaderOption) HeaderOption {
-	return func(p PacketCodec) {
-		for _, opt := range opts {
-			opt(p)
-		}
-	}
-}
 
 // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/fb188936-5050-48d3-b350-dc43059638a4
 type PacketHeader struct {
@@ -48,7 +18,7 @@ type PacketHeader struct {
 	SessionId             uint64
 }
 
-func (hdr *PacketHeader) encodeHeader(pkt []byte, opts ...HeaderOption) {
+func (hdr *PacketHeader) encodeHeader(pkt []byte) {
 	p := PacketCodec(pkt)
 
 	p.SetProtocolId()
@@ -75,38 +45,6 @@ func (hdr *PacketHeader) encodeHeader(pkt []byte, opts ...HeaderOption) {
 	}
 
 	p.SetSessionId(hdr.SessionId)
-
-	// Apply any additional options
-	for _, opt := range opts {
-		opt(p)
-	}
-}
-
-func (hdr *PacketHeader) decodeHeader(pkt []byte) error {
-	p := PacketCodec(pkt)
-
-	if p.IsInvalid() {
-		return errors.New("packet header is invalid")
-	}
-
-	hdr.CreditCharge = p.CreditCharge()
-	if p.ChannelSequence() != 0 {
-		hdr.ChannelSequence = p.ChannelSequence()
-	} else {
-		hdr.Status = p.Status()
-	}
-	hdr.Command = p.Command()
-	hdr.CreditRequestResponse = p.CreditResponse()
-	hdr.Flags = p.Flags()
-	hdr.MessageId = p.MessageId()
-	if p.TreeId() != 0 {
-		hdr.TreeId = p.TreeId()
-	} else {
-		hdr.AsyncId = p.AsyncId()
-	}
-	hdr.SessionId = p.SessionId()
-
-	return nil
 }
 
 // ----------------------------------------------------------------------------
@@ -117,64 +55,6 @@ type Packet interface {
 	Encoder
 
 	Header() *PacketHeader
-}
-
-// ----------------------------------------------------------------------------
-// CompoundPacket
-//
-
-// CompoundPacket represents a series of SMB2 packets that should be sent as a compound request
-//
-// Note: only dependent requests are supported at the moment
-type CompoundPacket struct {
-	Requests []Packet
-}
-
-var _ Packet = (*CompoundPacket)(nil)
-
-// NewCompoundPacket creates a new CompoundPacket based on the given requests (Packets)
-func NewCompoundPacket(reqs ...Packet) *CompoundPacket {
-	return &CompoundPacket{Requests: reqs}
-}
-
-func (c *CompoundPacket) Header() *PacketHeader {
-	if len(c.Requests) == 0 {
-		return nil
-	}
-	return c.Requests[0].Header()
-}
-
-func (c *CompoundPacket) Size() int {
-	total := 0
-	numPackets := len(c.Requests)
-	for i, req := range c.Requests {
-		s := req.Size()
-		if i < numPackets-1 {
-			s = Roundup(s, 8) // all but least requests are 8-byte aligned
-		}
-		total += s
-	}
-	return total
-}
-
-func (c *CompoundPacket) Encode(pkt []byte) {
-	offset := 0
-	for i, req := range c.Requests {
-		var opts []HeaderOption
-		if i < len(c.Requests)-1 {
-			// Set NextCommand for all but the last request
-			opts = append(opts, WithNextCommand(uint32(Roundup(req.Size(), 8)))) // next request is 8-byte aligned
-		}
-
-		if i > 0 {
-			// Set DependentCompoundRequest for all but the first request
-			opts = append(opts, SetDependentCompoundRequest())
-		}
-
-		req.Encode(pkt[offset:])
-		req.Header().encodeHeader(pkt[offset:], opts...) // need to re-encode the header because we want to set the options
-		offset += Roundup(req.Size(), 8)                 // packets are 8-byte aligned
-	}
 }
 
 // ----------------------------------------------------------------------------

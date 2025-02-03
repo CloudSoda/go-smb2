@@ -113,24 +113,17 @@ retry:
 		return nil, err
 	}
 
-	pkts, err := conn.recv(rr)
+	pkt, err := conn.recv(rr)
 	if err != nil {
 		return nil, err
 	}
-	if len(pkts) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
-	pkt := pkts[0]
 
-	res, err := accept(pkts, SMB2_NEGOTIATE)
+	res, err := accept(SMB2_NEGOTIATE, pkt)
 	if err != nil {
 		return nil, err
 	}
-	if len(res) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := NegotiateResponseDecoder(res[0]) // in case of negotiation, it is expected to have a single response
+	r := NegotiateResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken negotiate response format"}
 	}
@@ -328,6 +321,21 @@ func (conn *conn) enableSession() {
 	atomic.StoreInt32(&conn._useSession, 1)
 }
 
+//nolint:unused // appears to be legacy, unsure, so leaving for now
+func (conn *conn) sendRecv(cmd uint16, req Packet, ctx context.Context) (res []byte, err error) {
+	rr, err := conn.send(req, ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	pkt, err := conn.recv(rr)
+	if err != nil {
+		return nil, err
+	}
+
+	return accept(cmd, pkt)
+}
+
 func (conn *conn) loanCredit(payloadSize int, ctx context.Context) (creditCharge uint16, grantedPayloadSize int, err error) {
 	if conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		creditCharge = 1
@@ -381,7 +389,7 @@ func (conn *conn) sendWith(req Packet, tc *treeConn, ctx context.Context) (rr *r
 			if err != nil {
 				conn.outstandingRequests.pop(rr.msgId)
 
-				return nil, fmt.Errorf("failed to send request: %w", &TransportError{err})
+				return nil, &TransportError{err}
 			}
 		case <-ctx.Done():
 			conn.outstandingRequests.pop(rr.msgId)
@@ -431,12 +439,6 @@ func (conn *conn) makeRequestResponse(req Packet, tc *treeConn, ctx context.Cont
 
 	req.Encode(pkt)
 
-	// TODO: remove me 👇
-	cmd := GetCommandName(hdr.Command)
-	logger.Printf("makeRequestResponse(): %s - packet (%d bytes):", cmd, len(pkt))
-	logger.Println("\n\t" + DumpPacket(pkt, "\t"))
-	// TODO: /end remove me 👆
-
 	if s != nil {
 		if _, ok := req.(*SessionSetupRequest); !ok {
 			if s.sessionFlags&SMB2_SESSION_FLAG_ENCRYPT_DATA != 0 || (tc != nil && tc.shareFlags&SMB2_SHAREFLAG_ENCRYPT_DATA != 0) {
@@ -465,27 +467,18 @@ func (conn *conn) makeRequestResponse(req Packet, tc *treeConn, ctx context.Cont
 	return rr, nil
 }
 
-func (conn *conn) recv(rr *requestResponse) ([][]byte, error) {
-	var pkts [][]byte
-	var done bool
-	for !done {
-		select {
-		case pkt, ok := <-rr.recv:
-			if rr.err != nil {
-				return nil, rr.err
-			}
-			if !ok {
-				done = true
-				continue
-			}
-			pkts = append(pkts, pkt)
-		case <-rr.ctx.Done():
-			conn.outstandingRequests.pop(rr.msgId)
-
-			return nil, rr.ctx.Err()
+func (conn *conn) recv(rr *requestResponse) ([]byte, error) {
+	select {
+	case pkt := <-rr.recv:
+		if rr.err != nil {
+			return nil, rr.err
 		}
+		return pkt, nil
+	case <-rr.ctx.Done():
+		conn.outstandingRequests.pop(rr.msgId)
+
+		return nil, rr.ctx.Err()
 	}
-	return pkts, nil
 }
 
 func (conn *conn) runSender() {
@@ -507,24 +500,29 @@ func (conn *conn) runReciever() {
 	for {
 		n, e := conn.t.ReadSize()
 		if e != nil {
-			err = fmt.Errorf("failed to read packet size: %w", &TransportError{e})
+			err = &TransportError{e}
+
 			goto exit
 		}
 
 		pkt := make([]byte, n)
+
 		_, e = conn.t.Read(pkt)
 		if e != nil {
-			err = fmt.Errorf("failed to read packet: %w", &TransportError{e})
+			err = &TransportError{e}
+
 			goto exit
 		}
 
 		hasSession := conn.useSession()
+
 		var isEncrypted bool
 
 		if hasSession {
 			pkt, e, isEncrypted = conn.tryDecrypt(pkt)
 			if e != nil {
 				logger.Println("skip:", e)
+
 				continue
 			}
 
@@ -532,6 +530,7 @@ func (conn *conn) runReciever() {
 			if s := conn.session; s != nil {
 				if s.sessionId != p.SessionId() {
 					logger.Println("skip:", &InvalidResponseError{"unknown session id"})
+
 					continue
 				}
 
@@ -556,25 +555,16 @@ func (conn *conn) runReciever() {
 				next = nil
 			}
 
-			// TODO: remove me 👇
-			logger.Printf("runReceiver(): Command: %d (%s) %d bytes (expecting %d bytes), next command: %d", p.Command(), GetCommandName(p.Command()), len(pkt), p.StructureSize(), p.NextCommand())
-			logger.Println("\n\t" + DumpPacket(pkt, "\t"))
-			// TODO:/end remove me 👆
-
 			if hasSession {
 				e = conn.tryVerify(pkt, isEncrypted)
 			}
 
-			var rr *requestResponse
-			rr, e = conn.tryHandle(pkt, e)
+			e = conn.tryHandle(pkt, e)
 			if e != nil {
 				logger.Println("skip:", e)
 			}
 
-			if next == nil { // next == nil means we reached the end of packets in response
-				if rr != nil { // rr != nil means we have a request response, and we need to close its recv channel
-					close(rr.recv)
-				}
+			if next == nil {
 				break
 			}
 
@@ -600,64 +590,51 @@ exit:
 	close(conn.wdone)
 }
 
-func accept(pkts [][]byte, cmds ...uint16) (res [][]byte, err error) {
-	if len(pkts) != len(cmds) {
-		return nil, &InvalidResponseError{fmt.Sprintf("expected the same number of packets and commands, got %d packets and have %d commands", len(pkts), len(cmds))}
-	}
-	if len(cmds) == 0 {
-		return nil, &InvalidResponseError{"expected at least one command to verify"}
+func accept(cmd uint16, pkt []byte) (res []byte, err error) {
+	p := PacketCodec(pkt)
+	if command := p.Command(); cmd != command {
+		return nil, &InvalidResponseError{fmt.Sprintf("expected command: %v, got %v", cmd, command)}
 	}
 
-	for i, cmd := range cmds {
-		pkt := pkts[i]
-		p := PacketCodec(pkt)
-		if command := p.Command(); cmd != command {
-			return nil, &InvalidResponseError{fmt.Sprintf("expected command: %v, got %v", cmd, command)}
-		}
+	status := erref.NtStatus(p.Status())
 
-		status := erref.NtStatus(p.Status())
-
-		switch status {
-		case erref.STATUS_SUCCESS:
-			res = append(res, p.Data())
-			continue
-		case erref.STATUS_OBJECT_NAME_COLLISION:
-			return nil, os.ErrExist
-		case erref.STATUS_OBJECT_NAME_NOT_FOUND, erref.STATUS_OBJECT_PATH_NOT_FOUND:
-			return nil, os.ErrNotExist
-		case erref.STATUS_ACCESS_DENIED, erref.STATUS_CANNOT_DELETE:
-			return nil, os.ErrPermission
-		}
-
-		switch cmd {
-		case SMB2_SESSION_SETUP:
-			if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
-				res = append(res, p.Data())
-				continue
-			}
-		case SMB2_QUERY_INFO:
-			if status == erref.STATUS_BUFFER_OVERFLOW {
-				return nil, &ResponseError{Code: uint32(status)}
-			}
-		case SMB2_IOCTL:
-			if status == erref.STATUS_BUFFER_OVERFLOW {
-				if !IoctlResponseDecoder(p.Data()).IsInvalid() {
-					return res, &ResponseError{Code: uint32(status)}
-				}
-			}
-		case SMB2_READ:
-			if status == erref.STATUS_BUFFER_OVERFLOW {
-				return nil, &ResponseError{Code: uint32(status)}
-			}
-		case SMB2_CHANGE_NOTIFY:
-			if status == erref.STATUS_NOTIFY_ENUM_DIR {
-				return nil, &ResponseError{Code: uint32(status)}
-			}
-		}
-
-		return nil, acceptError(uint32(status), p.Data())
+	switch status {
+	case erref.STATUS_SUCCESS:
+		return p.Data(), nil
+	case erref.STATUS_OBJECT_NAME_COLLISION:
+		return nil, os.ErrExist
+	case erref.STATUS_OBJECT_NAME_NOT_FOUND, erref.STATUS_OBJECT_PATH_NOT_FOUND:
+		return nil, os.ErrNotExist
+	case erref.STATUS_ACCESS_DENIED, erref.STATUS_CANNOT_DELETE:
+		return nil, os.ErrPermission
 	}
-	return res, nil
+
+	switch cmd {
+	case SMB2_SESSION_SETUP:
+		if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
+			return p.Data(), nil
+		}
+	case SMB2_QUERY_INFO:
+		if status == erref.STATUS_BUFFER_OVERFLOW {
+			return nil, &ResponseError{Code: uint32(status)}
+		}
+	case SMB2_IOCTL:
+		if status == erref.STATUS_BUFFER_OVERFLOW {
+			if !IoctlResponseDecoder(p.Data()).IsInvalid() {
+				return p.Data(), &ResponseError{Code: uint32(status)}
+			}
+		}
+	case SMB2_READ:
+		if status == erref.STATUS_BUFFER_OVERFLOW {
+			return nil, &ResponseError{Code: uint32(status)}
+		}
+	case SMB2_CHANGE_NOTIFY:
+		if status == erref.STATUS_NOTIFY_ENUM_DIR {
+			return nil, &ResponseError{Code: uint32(status)}
+		}
+	}
+
+	return nil, acceptError(uint32(status), p.Data())
 }
 
 func acceptError(status uint32, res []byte) error {
@@ -748,7 +725,7 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 	return nil
 }
 
-func (conn *conn) tryHandle(pkt []byte, e error) (*requestResponse, error) {
+func (conn *conn) tryHandle(pkt []byte, e error) error {
 	p := PacketCodec(pkt)
 
 	msgId := p.MessageId()
@@ -756,7 +733,7 @@ func (conn *conn) tryHandle(pkt []byte, e error) (*requestResponse, error) {
 	rr, ok := conn.outstandingRequests.pop(msgId)
 	switch {
 	case !ok:
-		return nil, &InvalidResponseError{"unknown message id returned"}
+		return &InvalidResponseError{"unknown message id returned"}
 	case e != nil:
 		rr.err = e
 
@@ -771,5 +748,5 @@ func (conn *conn) tryHandle(pkt []byte, e error) (*requestResponse, error) {
 		rr.recv <- pkt
 	}
 
-	return rr, nil
+	return nil
 }

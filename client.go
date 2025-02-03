@@ -350,7 +350,7 @@ func (fs *Share) newFile(r CreateResponseDecoder, name string) *File {
 		FileName:       base(name),
 	}
 
-	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat, mapping: fs.mapping, createContextDecoders: r.CreateContexts()}
+	f := &File{fs: fs, fd: fd, name: name, fileStat: fileStat, mapping: fs.mapping}
 
 	runtime.SetFinalizer(f, (*File).close)
 
@@ -1131,95 +1131,12 @@ func (fs *Share) SetSecurityInfoRaw(name string, flags SecurityInformationReques
 		FileId:                f.fd,
 	}
 
-	req.CreditCharge, _, err = fs.loanCredit(req.Size())
-	defer func() {
-		if err != nil {
-			fs.chargeCredit(req.CreditCharge)
-		}
-	}()
-	if err != nil {
-		return fmt.Errorf("calling loanCredit: %w", err)
-	}
-
-	_, err = fs.sendRecv(req, SMB2_SET_INFO)
+	_, err = fs.sendRecv(SMB2_SET_INFO, req)
 	if err != nil {
 		return &os.PathError{Op: op, Path: name, Err: err}
 	}
 
 	return nil
-}
-
-func (fs *Share) SecurityInfoRaw2(name string, info SecurityInformationRequestFlags) ([]byte, error) {
-	const op = "secinfo2"
-	name = normPath(name)
-	if err := validatePath(op, name, false); err != nil {
-		return nil, err
-	}
-
-	if info == 0 {
-		return nil, &os.PathError{
-			Op:   op,
-			Path: name,
-			Err:  fmt.Errorf("%w: one or more SecurityInformation values must be specified", os.ErrInvalid),
-		}
-	}
-
-	if fs.conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
-		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("expecting SMB2_GLOBAL_CAP_LARGE_MTU feature to be supported")}
-	}
-
-	// we need to have at least READ_CONTROL in order to get the security descriptor
-	var access uint32 = READ_CONTROL // TODO: create a dedicated type for access mask
-	if info&SACLSecurityInformation != 0 {
-		access |= ACCESS_SYSTEM_SECURITY
-	}
-
-	creq := &CreateRequest{
-		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
-		SmbCreateFlags:       0,
-		DesiredAccess:        access,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        0,
-		Mapping:              fs.mapping,
-	}
-	qreq := &QueryInfoRequest{
-		InfoType:              SMB2_0_INFO_SECURITY, // TODO: rename info type constants to be more idiomatic with go
-		FileInfoClass:         0,                    // From the docs: "For security queries, this field MUST be set to 0"
-		OutputBufferLength:    64 * 1024,            // Security descriptors have a max size of 64 KiB on NTFS: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerysecurityobject#remarks
-		AdditionalInformation: uint32(info),
-		Flags:                 0,
-		FileId: &FileId{ // in compound requests, this value represents the result of the create request
-			Persistent: [8]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
-			Volatile:   [8]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
-		},
-	}
-	req := NewCompoundPacket(creq, qreq)
-
-	var err error
-	creq.CreditCharge, _, err = fs.loanCredit(req.Size()) // put credit charge in first header
-	defer func() {
-		if err != nil {
-			fs.chargeCredit(creq.CreditCharge)
-		}
-	}()
-	if err != nil {
-		return nil, fmt.Errorf("calling loanCredit: %w", err)
-	}
-
-	rss, err := fs.sendRecv(req, SMB2_CREATE, SMB2_QUERY_INFO) // two expected commands for two requests in compound request
-	if err != nil {
-		return nil, &os.PathError{Op: op, Path: name, Err: err}
-	}
-
-	if len(rss) < 2 {
-		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("expecting two commands in compound response, but got one")}
-	}
-
-	return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("compound security info not implemented yet")}
 }
 
 func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
@@ -1243,15 +1160,12 @@ func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool
 
 	req.Name = name
 
-	res, err := fs.sendRecv(req, SMB2_CREATE)
+	res, err := fs.sendRecv(SMB2_CREATE, req)
 	if err != nil {
 		return nil, fmt.Errorf("calling sendRecv: %w", err)
 	}
-	if len(res) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := CreateResponseDecoder(res[0])
+	r := CreateResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken create response format"}
 	}
@@ -1275,7 +1189,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 
 		req.Name = name
 
-		res, err := fs.sendRecv(req, SMB2_CREATE)
+		res, err := fs.sendRecv(SMB2_CREATE, req)
 		if err != nil {
 			if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_STOPPED_ON_SYMLINK {
 				if len(rerr.data) > 0 {
@@ -1288,11 +1202,8 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 			}
 			return nil, fmt.Errorf("calling sendRecv SMB2_CREATE: %w", err)
 		}
-		if len(res) == 0 {
-			return nil, &InvalidResponseError{"unexpected empty response"}
-		}
 
-		r := CreateResponseDecoder(res[0])
+		r := CreateResponseDecoder(res)
 		if r.IsInvalid() {
 			return nil, &InvalidResponseError{"broken create response format"}
 		}
@@ -1332,18 +1243,18 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 	return dir(ud) + target + u, nil
 }
 
-func (fs *Share) sendRecv(req Packet, cmds ...uint16) (res [][]byte, err error) {
+func (fs *Share) sendRecv(cmd uint16, req Packet) (res []byte, err error) {
 	rr, err := fs.send(req, fs.ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	pkts, err := fs.recv(rr)
+	pkt, err := fs.recv(rr)
 	if err != nil {
 		return nil, err
 	}
 
-	return accept(pkts, cmds...)
+	return accept(cmd, pkt)
 }
 
 func (fs *Share) loanCredit(payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
@@ -1360,8 +1271,6 @@ type File struct {
 	mapping     utf16le.MapChars
 
 	offset int64
-
-	createContextDecoders []CreateContextDecoder
 
 	m sync.Mutex
 }
@@ -1391,15 +1300,12 @@ func (f *File) close() error {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(req, SMB2_CLOSE)
+	res, err := f.sendRecv(SMB2_CLOSE, req)
 	if err != nil {
 		return err
 	}
-	if len(res) == 0 {
-		return &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := CloseResponseDecoder(res[0])
+	r := CloseResponseDecoder(res)
 	if r.IsInvalid() {
 		return &InvalidResponseError{"broken close response format"}
 	}
@@ -1583,15 +1489,12 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) 
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(req, SMB2_READ)
+	res, err := f.sendRecv(SMB2_READ, req)
 	if err != nil {
 		return nil, false, err
 	}
-	if len(res) == 0 {
-		return nil, false, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := ReadResponseDecoder(res[0])
+	r := ReadResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, false, &InvalidResponseError{"broken read response format"}
 	}
@@ -1840,15 +1743,12 @@ func (f *File) Sync() (err error) {
 		return &os.PathError{Op: "sync", Path: f.name, Err: err}
 	}
 
-	res, err := f.sendRecv(req, SMB2_FLUSH)
+	res, err := f.sendRecv(SMB2_FLUSH, req)
 	if err != nil {
 		return &os.PathError{Op: "sync", Path: f.name, Err: err}
 	}
-	if len(res) == 0 {
-		return &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := FlushResponseDecoder(res[0])
+	r := FlushResponseDecoder(res)
 	if r.IsInvalid() {
 		return &os.PathError{Op: "sync", Path: f.name, Err: &InvalidResponseError{"broken flush response format"}}
 	}
@@ -2023,15 +1923,12 @@ func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(req, SMB2_WRITE)
+	res, err := f.sendRecv(SMB2_WRITE, req)
 	if err != nil {
 		return 0, err
 	}
-	if len(res) == 0 {
-		return 0, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := WriteResponseDecoder(res[0])
+	r := WriteResponseDecoder(res)
 	if r.IsInvalid() {
 		return 0, &InvalidResponseError{"broken write response format"}
 	}
@@ -2259,22 +2156,16 @@ func (f *File) ioctl(req *IoctlRequest) (output []byte, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(req, SMB2_IOCTL)
+	res, err := f.sendRecv(SMB2_IOCTL, req)
 	if err != nil {
-		if len(res) == 0 {
-			return nil, err
-		}
-		r := IoctlResponseDecoder(res[0])
+		r := IoctlResponseDecoder(res)
 		if r.IsInvalid() {
 			return nil, err
 		}
 		return r.Output(), err
 	}
-	if len(res) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := IoctlResponseDecoder(res[0])
+	r := IoctlResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken ioctl response format"}
 	}
@@ -2310,15 +2201,12 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(req, SMB2_QUERY_DIRECTORY)
+	res, err := f.sendRecv(SMB2_QUERY_DIRECTORY, req)
 	if err != nil {
 		return nil, err
 	}
-	if len(res) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := QueryDirectoryResponseDecoder(res[0])
+	r := QueryDirectoryResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query directory response format"}
 	}
@@ -2377,15 +2265,12 @@ func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(req, SMB2_QUERY_INFO)
+	res, err := f.sendRecv(SMB2_QUERY_INFO, req)
 	if err != nil {
 		return nil, err
 	}
-	if len(res) == 0 {
-		return nil, &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := QueryInfoResponseDecoder(res[0])
+	r := QueryInfoResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query info response format"}
 	}
@@ -2435,15 +2320,12 @@ func (f *File) setInfo(req *SetInfoRequest) (err error) {
 
 	req.InfoType = SMB2_0_INFO_FILE
 
-	res, err := f.sendRecv(req, SMB2_SET_INFO)
+	res, err := f.sendRecv(SMB2_SET_INFO, req)
 	if err != nil {
 		return err
 	}
-	if len(res) == 0 {
-		return &InvalidResponseError{"unexpected empty response"}
-	}
 
-	r := SetInfoResponseDecoder(res[0])
+	r := SetInfoResponseDecoder(res)
 	if r.IsInvalid() {
 		return &InvalidResponseError{"broken set info response format"}
 	}
@@ -2451,8 +2333,8 @@ func (f *File) setInfo(req *SetInfoRequest) (err error) {
 	return nil
 }
 
-func (f *File) sendRecv(req Packet, cmd uint16) (res [][]byte, err error) {
-	return f.fs.sendRecv(req, cmd)
+func (f *File) sendRecv(cmd uint16, req Packet) (res []byte, err error) {
+	return f.fs.sendRecv(cmd, req)
 }
 
 type FileStat struct {

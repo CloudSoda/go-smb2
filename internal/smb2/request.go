@@ -469,7 +469,6 @@ func (c *CreateRequest) Encode(pkt []byte) {
 	req[3] = c.RequestedOplockLevel
 	le.PutUint32(req[4:8], c.ImpersonationLevel)
 	le.PutUint64(req[8:16], c.SmbCreateFlags)
-	le.PutUint64(req[16:24], 0) // Reserved
 	le.PutUint32(req[24:28], c.DesiredAccess)
 	le.PutUint32(req[28:32], c.FileAttributes)
 	le.PutUint32(req[32:36], c.ShareAccess)
@@ -479,8 +478,8 @@ func (c *CreateRequest) Encode(pkt []byte) {
 	// Name
 	nlen := utf16le.EncodeSlice(req[56:], c.Name, c.Mapping)
 
-	le.PutUint16(req[44:46], 56+64)        // NameOffset
-	le.PutUint16(req[46:48], uint16(nlen)) // NameLength
+	le.PutUint16(req[44:46], 56+64)
+	le.PutUint16(req[46:48], uint16(nlen))
 
 	off := 56 + nlen
 
@@ -493,7 +492,7 @@ func (c *CreateRequest) Encode(pkt []byte) {
 		if i == 0 {
 			le.PutUint32(req[48:52], uint32(64+off)) // CreateContextsOffset
 		} else {
-			le.PutUint32(ctx[:4], uint32(next)) // Next Offset relative to current context
+			le.PutUint32(ctx[:4], uint32(next)) // Next
 		}
 
 		ctx = req[off:]
