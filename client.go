@@ -15,7 +15,7 @@ import (
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/msrpc"
-	. "github.com/cloudsoda/go-smb2/internal/smb2"
+	"github.com/cloudsoda/go-smb2/internal/smb2"
 	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
 
@@ -196,13 +196,13 @@ func (c *Session) ListSharenames() ([]string, error) {
 
 	callId := rand.Uint32()
 
-	bindReq := &IoctlRequest{
-		CtlCode:           FSCTL_PIPE_TRANSCEIVE,
+	bindReq := &smb2.IoctlRequest{
+		CtlCode:           smb2.FSCTL_PIPE_TRANSCEIVE,
 		OutputOffset:      0,
 		OutputCount:       0,
 		MaxInputResponse:  0,
 		MaxOutputResponse: 4280,
-		Flags:             SMB2_0_IOCTL_IS_FSCTL,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 		Input: &msrpc.Bind{
 			CallId: callId,
 		},
@@ -220,14 +220,14 @@ func (c *Session) ListSharenames() ([]string, error) {
 
 	callId++
 
-	reqReq := &IoctlRequest{
-		CtlCode:          FSCTL_PIPE_TRANSCEIVE,
+	reqReq := &smb2.IoctlRequest{
+		CtlCode:          smb2.FSCTL_PIPE_TRANSCEIVE,
 		OutputOffset:     0,
 		OutputCount:      0,
 		MaxInputResponse: 0,
 		// MaxOutputResponse: 4280,
 		MaxOutputResponse: 1024,
-		Flags:             SMB2_0_IOCTL_IS_FSCTL,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 		Input: &msrpc.NetShareEnumAllRequest{
 			CallId:     callId,
 			ServerName: servername,
@@ -311,7 +311,7 @@ func (fs *Share) Create(name string) (*File, error) {
 	return fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 }
 
-func (fs *Share) newFile(r CreateResponseDecoder, name string) *File {
+func (fs *Share) newFile(r smb2.CreateResponseDecoder, name string) *File {
 	fd := r.FileId().Decode()
 
 	fileStat := &FileStat{
@@ -346,51 +346,51 @@ func (fs *Share) OpenFile(name string, flag int, perm os.FileMode) (*File, error
 	var access uint32
 	switch flag & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR) {
 	case os.O_RDONLY:
-		access = GENERIC_READ
+		access = smb2.GENERIC_READ
 	case os.O_WRONLY:
-		access = GENERIC_WRITE
+		access = smb2.GENERIC_WRITE
 	case os.O_RDWR:
-		access = GENERIC_READ | GENERIC_WRITE
+		access = smb2.GENERIC_READ | smb2.GENERIC_WRITE
 	}
 	if flag&os.O_CREATE != 0 {
-		access |= GENERIC_WRITE
+		access |= smb2.GENERIC_WRITE
 	}
 	if flag&os.O_APPEND != 0 {
-		access &^= GENERIC_WRITE
-		access |= FILE_APPEND_DATA
+		access &^= smb2.GENERIC_WRITE
+		access |= smb2.FILE_APPEND_DATA
 	}
 
-	sharemode := uint32(FILE_SHARE_READ | FILE_SHARE_WRITE)
+	sharemode := uint32(smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE)
 
 	var createmode uint32
 	switch {
 	case flag&(os.O_CREATE|os.O_EXCL) == (os.O_CREATE | os.O_EXCL):
-		createmode = FILE_CREATE
+		createmode = smb2.FILE_CREATE
 	case flag&(os.O_CREATE|os.O_TRUNC) == (os.O_CREATE | os.O_TRUNC):
-		createmode = FILE_OVERWRITE_IF
+		createmode = smb2.FILE_OVERWRITE_IF
 	case flag&os.O_CREATE == os.O_CREATE:
-		createmode = FILE_OPEN_IF
+		createmode = smb2.FILE_OPEN_IF
 	case flag&os.O_TRUNC == os.O_TRUNC:
-		createmode = FILE_OVERWRITE
+		createmode = smb2.FILE_OVERWRITE
 	default:
-		createmode = FILE_OPEN
+		createmode = smb2.FILE_OPEN
 	}
 
-	var attrs uint32 = FILE_ATTRIBUTE_NORMAL
+	var attrs uint32 = smb2.FILE_ATTRIBUTE_NORMAL
 	if perm&0200 == 0 {
-		attrs = FILE_ATTRIBUTE_READONLY
+		attrs = smb2.FILE_ATTRIBUTE_READONLY
 	}
 
-	req := &CreateRequest{
+	req := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
 		DesiredAccess:        access,
 		FileAttributes:       attrs,
 		ShareAccess:          sharemode,
 		CreateDisposition:    createmode,
-		CreateOptions:        FILE_SYNCHRONOUS_IO_NONALERT,
+		CreateOptions:        smb2.FILE_SYNCHRONOUS_IO_NONALERT,
 		Mapping:              fs.mapping,
 	}
 
@@ -411,16 +411,16 @@ func (fs *Share) Mkdir(name string, perm os.FileMode) error {
 		return err
 	}
 
-	req := &CreateRequest{
+	req := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_WRITE_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_CREATE,
-		CreateOptions:        FILE_DIRECTORY_FILE,
+		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_CREATE,
+		CreateOptions:        smb2.FILE_DIRECTORY_FILE,
 		Mapping:              fs.mapping,
 	}
 
@@ -443,16 +443,16 @@ func (fs *Share) Readlink(name string) (string, error) {
 		return "", err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_READ_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
 	}
 
@@ -461,13 +461,13 @@ func (fs *Share) Readlink(name string) (string, error) {
 		return "", &os.PathError{Op: "readlink", Path: name, Err: err}
 	}
 
-	req := &IoctlRequest{
-		CtlCode:           FSCTL_GET_REPARSE_POINT,
+	req := &smb2.IoctlRequest{
+		CtlCode:           smb2.FSCTL_GET_REPARSE_POINT,
 		OutputOffset:      0,
 		OutputCount:       0,
 		MaxInputResponse:  0,
 		MaxOutputResponse: uint32(f.maxTransactSize()),
-		Flags:             SMB2_0_IOCTL_IS_FSCTL,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 		Input:             nil,
 	}
 
@@ -479,7 +479,7 @@ func (fs *Share) Readlink(name string) (string, error) {
 		return "", &os.PathError{Op: "readlink", Path: f.name, Err: err}
 	}
 
-	r := SymbolicLinkReparseDataBufferDecoder(output)
+	r := smb2.SymbolicLinkReparseDataBufferDecoder(output)
 	if r.IsInvalid() {
 		return "", &os.PathError{Op: "readlink", Path: f.name, Err: &InvalidResponseError{"broken symbolic link response data buffer format"}}
 	}
@@ -514,16 +514,16 @@ func (fs *Share) remove(name string) error {
 		return err
 	}
 
-	req := &CreateRequest{
+	req := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        DELETE,
+		DesiredAccess:        smb2.DELETE,
 		FileAttributes:       0,
-		ShareAccess:          FILE_SHARE_DELETE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		ShareAccess:          smb2.FILE_SHARE_DELETE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
 	}
 	// FILE_DELETE_ON_CLOSE doesn't work for reparse point, so use FileDispositionInformation instead
@@ -556,16 +556,16 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		return err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        DELETE,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_DELETE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		DesiredAccess:        smb2.DELETE,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_DELETE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
 	}
 
@@ -574,10 +574,10 @@ func (fs *Share) Rename(oldpath, newpath string) error {
 		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: err}
 	}
 
-	info := &SetInfoRequest{
-		FileInfoClass:         FileRenameInformation,
+	info := &smb2.SetInfoRequest{
+		FileInfoClass:         smb2.FileRenameInformation,
 		AdditionalInformation: 0,
-		Input: &FileRenameInformationType2Encoder{
+		Input: &smb2.FileRenameInformationType2Encoder{
 			ReplaceIfExists: 1, // if a file exists at newpath, overwrite it
 			RootDirectory:   0,
 			FileName:        newpath,
@@ -616,7 +616,7 @@ func (fs *Share) Symlink(target, linkpath string) error {
 		return err
 	}
 
-	rdbuf := new(SymbolicLinkReparseDataBuffer)
+	rdbuf := new(smb2.SymbolicLinkReparseDataBuffer)
 	rdbuf.Mapping = fs.mapping
 
 	if len(target) >= 2 && target[1] == ':' {
@@ -625,28 +625,28 @@ func (fs *Share) Symlink(target, linkpath string) error {
 		}
 
 		if target[2] != '\\' {
-			rdbuf.Flags = SYMLINK_FLAG_RELATIVE
+			rdbuf.Flags = smb2.SYMLINK_FLAG_RELATIVE
 		}
 		rdbuf.SubstituteName = `\??\` + target
 		rdbuf.PrintName = rdbuf.SubstituteName[4:]
 	} else {
 		if target[0] != '\\' {
-			rdbuf.Flags = SYMLINK_FLAG_RELATIVE // It's not true on window server.
+			rdbuf.Flags = smb2.SYMLINK_FLAG_RELATIVE // It's not true on window server.
 		}
 		rdbuf.SubstituteName = target
 		rdbuf.PrintName = rdbuf.SubstituteName
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_WRITE_ATTRIBUTES | DELETE,
-		FileAttributes:       FILE_ATTRIBUTE_REPARSE_POINT,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_CREATE,
-		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES | smb2.DELETE,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_REPARSE_POINT,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_CREATE,
+		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
 	}
 
@@ -655,13 +655,13 @@ func (fs *Share) Symlink(target, linkpath string) error {
 		return &os.LinkError{Op: "symlink", Old: target, New: linkpath, Err: err}
 	}
 
-	req := &IoctlRequest{
-		CtlCode:           FSCTL_SET_REPARSE_POINT,
+	req := &smb2.IoctlRequest{
+		CtlCode:           smb2.FSCTL_SET_REPARSE_POINT,
 		OutputOffset:      0,
 		OutputCount:       0,
 		MaxInputResponse:  0,
 		MaxOutputResponse: 0,
-		Flags:             SMB2_0_IOCTL_IS_FSCTL,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 		Input:             rdbuf,
 	}
 
@@ -688,16 +688,16 @@ func (fs *Share) Lstat(name string) (os.FileInfo, error) {
 		return nil, err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_READ_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_OPEN_REPARSE_POINT,
+		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_OPEN_REPARSE_POINT,
 		Mapping:              fs.mapping,
 	}
 
@@ -723,15 +723,15 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 		return nil, err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_READ_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
+		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
 	}
@@ -762,16 +762,16 @@ func (fs *Share) Truncate(name string, size int64) error {
 		return os.ErrInvalid
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_WRITE_DATA,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+		DesiredAccess:        smb2.FILE_WRITE_DATA,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_NON_DIRECTORY_FILE | smb2.FILE_SYNCHRONOUS_IO_NONALERT,
 		Mapping:              fs.mapping,
 	}
 
@@ -797,15 +797,15 @@ func (fs *Share) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		return err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_WRITE_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
+		DesiredAccess:        smb2.FILE_WRITE_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
 	}
@@ -815,12 +815,12 @@ func (fs *Share) Chtimes(name string, atime time.Time, mtime time.Time) error {
 		return &os.PathError{Op: "chtimes", Path: name, Err: err}
 	}
 
-	info := &SetInfoRequest{
-		FileInfoClass:         FileBasicInformation,
+	info := &smb2.SetInfoRequest{
+		FileInfoClass:         smb2.FileBasicInformation,
 		AdditionalInformation: 0,
-		Input: &FileBasicInformationEncoder{
-			LastAccessTime: NsecToFiletime(atime.UnixNano()),
-			LastWriteTime:  NsecToFiletime(mtime.UnixNano()),
+		Input: &smb2.FileBasicInformationEncoder{
+			LastAccessTime: smb2.NsecToFiletime(atime.UnixNano()),
+			LastWriteTime:  smb2.NsecToFiletime(mtime.UnixNano()),
 		},
 	}
 
@@ -841,15 +841,15 @@ func (fs *Share) Chmod(name string, mode os.FileMode) error {
 		return err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
+		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES | smb2.FILE_WRITE_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
 		CreateOptions:        0,
 		Mapping:              fs.mapping,
 	}
@@ -954,16 +954,16 @@ func (fs *Share) Statfs(name string) (FileFsInfo, error) {
 		return nil, err
 	}
 
-	create := &CreateRequest{
+	create := &smb2.CreateRequest{
 		SecurityFlags:        0,
-		RequestedOplockLevel: SMB2_OPLOCK_LEVEL_NONE,
-		ImpersonationLevel:   Impersonation,
+		RequestedOplockLevel: smb2.SMB2_OPLOCK_LEVEL_NONE,
+		ImpersonationLevel:   smb2.Impersonation,
 		SmbCreateFlags:       0,
-		DesiredAccess:        FILE_READ_ATTRIBUTES,
-		FileAttributes:       FILE_ATTRIBUTE_NORMAL,
-		ShareAccess:          FILE_SHARE_READ | FILE_SHARE_WRITE,
-		CreateDisposition:    FILE_OPEN,
-		CreateOptions:        FILE_DIRECTORY_FILE,
+		DesiredAccess:        smb2.FILE_READ_ATTRIBUTES,
+		FileAttributes:       smb2.FILE_ATTRIBUTE_NORMAL,
+		ShareAccess:          smb2.FILE_SHARE_READ | smb2.FILE_SHARE_WRITE,
+		CreateDisposition:    smb2.FILE_OPEN,
+		CreateOptions:        smb2.FILE_DIRECTORY_FILE,
 		Mapping:              fs.mapping,
 	}
 
@@ -982,7 +982,7 @@ func (fs *Share) Statfs(name string) (FileFsInfo, error) {
 	return fi, nil
 }
 
-func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool) (f *File, err error) {
+func (fs *Share) createFile(name string, req *smb2.CreateRequest, followSymlinks bool) (f *File, err error) {
 	if followSymlinks {
 		return fs.createFileRec(name, req)
 	}
@@ -999,12 +999,12 @@ func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool
 
 	req.Name = name
 
-	res, err := fs.sendRecv(SMB2_CREATE, req)
+	res, err := fs.sendRecv(smb2.SMB2_CREATE, req)
 	if err != nil {
 		return nil, err
 	}
 
-	r := CreateResponseDecoder(res)
+	r := smb2.CreateResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken create response format"}
 	}
@@ -1014,7 +1014,7 @@ func (fs *Share) createFile(name string, req *CreateRequest, followSymlinks bool
 	return f, nil
 }
 
-func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err error) {
+func (fs *Share) createFileRec(name string, req *smb2.CreateRequest) (f *File, err error) {
 	for i := 0; i < clientMaxSymlinkDepth; i++ {
 		req.CreditCharge, _, err = fs.loanCredit(0)
 		defer func() {
@@ -1028,7 +1028,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 
 		req.Name = name
 
-		res, err := fs.sendRecv(SMB2_CREATE, req)
+		res, err := fs.sendRecv(smb2.SMB2_CREATE, req)
 		if err != nil {
 			if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_STOPPED_ON_SYMLINK {
 				if len(rerr.data) > 0 {
@@ -1042,7 +1042,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 			return nil, err
 		}
 
-		r := CreateResponseDecoder(res)
+		r := smb2.CreateResponseDecoder(res)
 		if r.IsInvalid() {
 			return nil, &InvalidResponseError{"broken create response format"}
 		}
@@ -1056,7 +1056,7 @@ func (fs *Share) createFileRec(name string, req *CreateRequest) (f *File, err er
 }
 
 func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string, error) {
-	d := SymbolicLinkErrorResponseDecoder(errData)
+	d := smb2.SymbolicLinkErrorResponseDecoder(errData)
 	if d.IsInvalid() {
 		return "", &InvalidResponseError{"broken symbolic link error response format"}
 	}
@@ -1075,14 +1075,14 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 		target = target[4:]
 	}
 
-	if d.Flags()&SYMLINK_FLAG_RELATIVE == 0 {
+	if d.Flags()&smb2.SYMLINK_FLAG_RELATIVE == 0 {
 		return target + u, nil
 	}
 
 	return dir(ud) + target + u, nil
 }
 
-func (fs *Share) sendRecv(cmd uint16, req Packet) (res []byte, err error) {
+func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
 	rr, err := fs.send(req, fs.ctx)
 	if err != nil {
 		return nil, err
@@ -1102,7 +1102,7 @@ func (fs *Share) loanCredit(payloadSize int) (creditCharge uint16, grantedPayloa
 
 type File struct {
 	fs          *Share
-	fd          *FileId
+	fd          *smb2.FileId
 	name        string
 	fileStat    *FileStat
 	dirents     []os.FileInfo
@@ -1131,7 +1131,7 @@ func (f *File) close() error {
 		return os.ErrInvalid
 	}
 
-	req := &CloseRequest{
+	req := &smb2.CloseRequest{
 		Flags: 0,
 	}
 
@@ -1139,12 +1139,12 @@ func (f *File) close() error {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(SMB2_CLOSE, req)
+	res, err := f.sendRecv(smb2.SMB2_CLOSE, req)
 	if err != nil {
 		return err
 	}
 
-	r := CloseResponseDecoder(res)
+	r := smb2.CloseResponseDecoder(res)
 	if r.IsInvalid() {
 		return &InvalidResponseError{"broken close response format"}
 	}
@@ -1157,10 +1157,10 @@ func (f *File) close() error {
 }
 
 func (f *File) remove() error {
-	info := &SetInfoRequest{
-		FileInfoClass:         FileDispositionInformation,
+	info := &smb2.SetInfoRequest{
+		FileInfoClass:         smb2.FileDispositionInformation,
 		AdditionalInformation: 0,
-		Input: &FileDispositionInformationEncoder{
+		Input: &smb2.FileDispositionInformationEncoder{
 			DeletePending: 1,
 		},
 	}
@@ -1225,7 +1225,7 @@ func (f *File) maxReadSize() int {
 	if size > winMaxPayloadSize {
 		size = winMaxPayloadSize
 	}
-	if f.fs.conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
+	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
 		}
@@ -1238,7 +1238,7 @@ func (f *File) maxWriteSize() int {
 	if size > winMaxPayloadSize {
 		size = winMaxPayloadSize
 	}
-	if f.fs.conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
+	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
 		}
@@ -1251,7 +1251,7 @@ func (f *File) maxTransactSize() int {
 	if size > winMaxPayloadSize {
 		size = winMaxPayloadSize
 	}
-	if f.fs.conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
+	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
 		}
@@ -1313,7 +1313,7 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) 
 		return nil, false, err
 	}
 
-	req := &ReadRequest{
+	req := &smb2.ReadRequest{
 		Padding:         0,
 		Flags:           0,
 		Length:          uint32(m),
@@ -1328,12 +1328,12 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) 
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(SMB2_READ, req)
+	res, err := f.sendRecv(smb2.SMB2_READ, req)
 	if err != nil {
 		return nil, false, err
 	}
 
-	r := ReadResponseDecoder(res)
+	r := smb2.ReadResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, false, &InvalidResponseError{"broken read response format"}
 	}
@@ -1422,9 +1422,9 @@ func (f *File) seek(offset int64, whence int) (ret int64, err error) {
 	case io.SeekCurrent:
 		f.offset += offset
 	case io.SeekEnd:
-		req := &QueryInfoRequest{
-			InfoType:              SMB2_0_INFO_FILE,
-			FileInfoClass:         FileStandardInformation,
+		req := &smb2.QueryInfoRequest{
+			InfoType:              smb2.SMB2_0_INFO_FILE,
+			FileInfoClass:         smb2.FileStandardInformation,
 			AdditionalInformation: 0,
 			Flags:                 0,
 			OutputBufferLength:    24,
@@ -1435,7 +1435,7 @@ func (f *File) seek(offset int64, whence int) (ret int64, err error) {
 			return -1, err
 		}
 
-		info := FileStandardInformationDecoder(infoBytes)
+		info := smb2.FileStandardInformationDecoder(infoBytes)
 		if info.IsInvalid() {
 			return -1, &InvalidResponseError{"broken query info response format"}
 		}
@@ -1457,9 +1457,9 @@ func (f *File) Stat() (os.FileInfo, error) {
 }
 
 func (f *File) stat() (os.FileInfo, error) {
-	req := &QueryInfoRequest{
-		InfoType:              SMB2_0_INFO_FILE,
-		FileInfoClass:         FileAllInformation,
+	req := &smb2.QueryInfoRequest{
+		InfoType:              smb2.SMB2_0_INFO_FILE,
+		FileInfoClass:         smb2.FileAllInformation,
 		AdditionalInformation: 0,
 		Flags:                 0,
 		OutputBufferLength:    uint32(f.maxTransactSize()),
@@ -1470,7 +1470,7 @@ func (f *File) stat() (os.FileInfo, error) {
 		return nil, err
 	}
 
-	info := FileAllInformationDecoder(infoBytes)
+	info := smb2.FileAllInformationDecoder(infoBytes)
 	if info.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query info response format"}
 	}
@@ -1541,9 +1541,9 @@ func (fi *fileFsFullSizeInformation) AvailableBlockCount() uint64 {
 }
 
 func (f *File) statfs() (FileFsInfo, error) {
-	req := &QueryInfoRequest{
-		InfoType:              SMB2_0_INFO_FILESYSTEM,
-		FileInfoClass:         FileFsFullSizeInformation,
+	req := &smb2.QueryInfoRequest{
+		InfoType:              smb2.SMB2_0_INFO_FILESYSTEM,
+		FileInfoClass:         smb2.FileFsFullSizeInformation,
 		AdditionalInformation: 0,
 		Flags:                 0,
 		OutputBufferLength:    32,
@@ -1554,7 +1554,7 @@ func (f *File) statfs() (FileFsInfo, error) {
 		return nil, err
 	}
 
-	info := FileFsFullSizeInformationDecoder(infoBytes)
+	info := smb2.FileFsFullSizeInformationDecoder(infoBytes)
 	if info.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query info response format"}
 	}
@@ -1569,7 +1569,7 @@ func (f *File) statfs() (FileFsInfo, error) {
 }
 
 func (f *File) Sync() (err error) {
-	req := new(FlushRequest)
+	req := new(smb2.FlushRequest)
 	req.FileId = f.fd
 
 	req.CreditCharge, _, err = f.fs.loanCredit(0)
@@ -1582,12 +1582,12 @@ func (f *File) Sync() (err error) {
 		return &os.PathError{Op: "sync", Path: f.name, Err: err}
 	}
 
-	res, err := f.sendRecv(SMB2_FLUSH, req)
+	res, err := f.sendRecv(smb2.SMB2_FLUSH, req)
 	if err != nil {
 		return &os.PathError{Op: "sync", Path: f.name, Err: err}
 	}
 
-	r := FlushResponseDecoder(res)
+	r := smb2.FlushResponseDecoder(res)
 	if r.IsInvalid() {
 		return &os.PathError{Op: "sync", Path: f.name, Err: &InvalidResponseError{"broken flush response format"}}
 	}
@@ -1608,10 +1608,10 @@ func (f *File) Truncate(size int64) error {
 }
 
 func (f *File) truncate(size int64) error {
-	info := &SetInfoRequest{
-		FileInfoClass:         FileEndOfFileInformation,
+	info := &smb2.SetInfoRequest{
+		FileInfoClass:         smb2.FileEndOfFileInformation,
 		AdditionalInformation: 0,
-		Input: &FileEndOfFileInformationEncoder{
+		Input: &smb2.FileEndOfFileInformationEncoder{
 			EndOfFile: size,
 		},
 	}
@@ -1632,9 +1632,9 @@ func (f *File) Chmod(mode os.FileMode) error {
 }
 
 func (f *File) chmod(mode os.FileMode) error {
-	req := &QueryInfoRequest{
-		InfoType:              SMB2_0_INFO_FILE,
-		FileInfoClass:         FileBasicInformation,
+	req := &smb2.QueryInfoRequest{
+		InfoType:              smb2.SMB2_0_INFO_FILE,
+		FileInfoClass:         smb2.FileBasicInformation,
 		AdditionalInformation: 0,
 		Flags:                 0,
 		OutputBufferLength:    40,
@@ -1645,7 +1645,7 @@ func (f *File) chmod(mode os.FileMode) error {
 		return err
 	}
 
-	base := FileBasicInformationDecoder(infoBytes)
+	base := smb2.FileBasicInformationDecoder(infoBytes)
 	if base.IsInvalid() {
 		return &InvalidResponseError{"broken query info response format"}
 	}
@@ -1653,20 +1653,20 @@ func (f *File) chmod(mode os.FileMode) error {
 	attrs := base.FileAttributes()
 
 	if mode&0200 != 0 {
-		attrs &^= FILE_ATTRIBUTE_READONLY
+		attrs &^= smb2.FILE_ATTRIBUTE_READONLY
 	} else {
-		attrs |= FILE_ATTRIBUTE_READONLY
+		attrs |= smb2.FILE_ATTRIBUTE_READONLY
 	}
 
 	// If the file is not a directory, we have to set the normal attribute.
-	if attrs&FILE_ATTRIBUTE_DIRECTORY == 0 {
-		attrs |= FILE_ATTRIBUTE_NORMAL
+	if attrs&smb2.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		attrs |= smb2.FILE_ATTRIBUTE_NORMAL
 	}
 
-	info := &SetInfoRequest{
-		FileInfoClass:         FileBasicInformation,
+	info := &smb2.SetInfoRequest{
+		FileInfoClass:         smb2.FileBasicInformation,
 		AdditionalInformation: 0,
-		Input: &FileBasicInformationEncoder{
+		Input: &smb2.FileBasicInformationEncoder{
 			FileAttributes: attrs,
 		},
 	}
@@ -1754,7 +1754,7 @@ func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 
-	req := &WriteRequest{
+	req := &smb2.WriteRequest{
 		Flags:            0,
 		Channel:          0,
 		RemainingBytes:   0,
@@ -1767,12 +1767,12 @@ func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(SMB2_WRITE, req)
+	res, err := f.sendRecv(smb2.SMB2_WRITE, req)
 	if err != nil {
 		return 0, err
 	}
 
-	r := WriteResponseDecoder(res)
+	r := smb2.WriteResponseDecoder(res)
 	if r.IsInvalid() {
 		return 0, &InvalidResponseError{"broken write response format"}
 	}
@@ -1811,13 +1811,13 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 	f.m.Lock()
 	defer f.m.Unlock()
 
-	req := &IoctlRequest{
-		CtlCode:           FSCTL_SRV_REQUEST_RESUME_KEY,
+	req := &smb2.IoctlRequest{
+		CtlCode:           smb2.FSCTL_SRV_REQUEST_RESUME_KEY,
 		OutputOffset:      0,
 		OutputCount:       0,
 		MaxInputResponse:  0,
 		MaxOutputResponse: 32,
-		Flags:             SMB2_0_IOCTL_IS_FSCTL,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 	}
 
 	output, err := f.ioctl(req)
@@ -1830,7 +1830,7 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 
 	}
 
-	sr := SrvRequestResumeKeyResponseDecoder(output)
+	sr := smb2.SrvRequestResumeKeyResponseDecoder(output)
 	if sr.IsInvalid() {
 		return true, -1, &os.LinkError{Op: "copy", Old: f.name, New: wf.name, Err: &InvalidResponseError{"broken srv request resume key response format"}}
 	}
@@ -1850,7 +1850,7 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 		return true, -1, &os.LinkError{Op: "copy", Old: f.name, New: wf.name, Err: err}
 	}
 
-	var chunks []*SrvCopychunk
+	var chunks []*smb2.SrvCopychunk
 
 	remains := end
 
@@ -1862,9 +1862,9 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 		if remains < maxTotalSize {
 			nchunks := remains / maxChunkSize
 
-			chunks = make([]*SrvCopychunk, nchunks, nchunks+1)
+			chunks = make([]*smb2.SrvCopychunk, nchunks, nchunks+1)
 			for i := range chunks {
-				chunks[i] = &SrvCopychunk{
+				chunks[i] = &smb2.SrvCopychunk{
 					SourceOffset: off + int64(i)*maxChunkSize,
 					TargetOffset: woff + int64(i)*maxChunkSize,
 					Length:       maxChunkSize,
@@ -1873,7 +1873,7 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 
 			remains %= maxChunkSize
 			if remains != 0 {
-				chunks = append(chunks, &SrvCopychunk{
+				chunks = append(chunks, &smb2.SrvCopychunk{
 					SourceOffset: off + int64(nchunks)*maxChunkSize,
 					TargetOffset: woff + int64(nchunks)*maxChunkSize,
 					Length:       uint32(remains),
@@ -1881,9 +1881,9 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 				remains = 0
 			}
 		} else {
-			chunks = make([]*SrvCopychunk, 16)
+			chunks = make([]*smb2.SrvCopychunk, 16)
 			for i := range chunks {
-				chunks[i] = &SrvCopychunk{
+				chunks[i] = &smb2.SrvCopychunk{
 					SourceOffset: off + int64(i)*maxChunkSize,
 					TargetOffset: woff + int64(i)*maxChunkSize,
 					Length:       maxChunkSize,
@@ -1893,19 +1893,19 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 			remains -= maxTotalSize
 		}
 
-		scc := &SrvCopychunkCopy{
+		scc := &smb2.SrvCopychunkCopy{
 			Chunks: chunks,
 		}
 
 		copy(scc.SourceKey[:], sr.ResumeKey())
 
-		cReq := &IoctlRequest{
-			CtlCode:           FSCTL_SRV_COPYCHUNK,
+		cReq := &smb2.IoctlRequest{
+			CtlCode:           smb2.FSCTL_SRV_COPYCHUNK,
 			OutputOffset:      0,
 			OutputCount:       0,
 			MaxInputResponse:  0,
 			MaxOutputResponse: 24,
-			Flags:             SMB2_0_IOCTL_IS_FSCTL,
+			Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
 			Input:             scc,
 		}
 
@@ -1914,7 +1914,7 @@ func (f *File) copyTo(wf *File) (supported bool, n int64, err error) {
 			return true, -1, &os.LinkError{Op: "copy", Old: f.name, New: wf.name, Err: err}
 		}
 
-		c := SrvCopychunkResponseDecoder(output)
+		c := smb2.SrvCopychunkResponseDecoder(output)
 		if c.IsInvalid() {
 			return true, -1, &os.LinkError{Op: "copy", Old: f.name, New: wf.name, Err: &InvalidResponseError{"broken srv copy chunk response format"}}
 		}
@@ -1971,14 +1971,14 @@ func (f *File) WriteString(s string) (n int, err error) {
 	return f.Write([]byte(s))
 }
 
-func (f *File) encodeSize(e Encoder) int {
+func (f *File) encodeSize(e smb2.Encoder) int {
 	if e == nil {
 		return 0
 	}
 	return e.Size()
 }
 
-func (f *File) ioctl(req *IoctlRequest) (output []byte, err error) {
+func (f *File) ioctl(req *smb2.IoctlRequest) (output []byte, err error) {
 	payloadSize := f.encodeSize(req.Input) + int(req.OutputCount)
 	if payloadSize < int(req.MaxOutputResponse+req.MaxInputResponse) {
 		payloadSize = int(req.MaxOutputResponse + req.MaxInputResponse)
@@ -2000,16 +2000,16 @@ func (f *File) ioctl(req *IoctlRequest) (output []byte, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(SMB2_IOCTL, req)
+	res, err := f.sendRecv(smb2.SMB2_IOCTL, req)
 	if err != nil {
-		r := IoctlResponseDecoder(res)
+		r := smb2.IoctlResponseDecoder(res)
 		if r.IsInvalid() {
 			return nil, err
 		}
 		return r.Output(), err
 	}
 
-	r := IoctlResponseDecoder(res)
+	r := smb2.IoctlResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken ioctl response format"}
 	}
@@ -2018,8 +2018,8 @@ func (f *File) ioctl(req *IoctlRequest) (output []byte, err error) {
 }
 
 func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
-	req := &QueryDirectoryRequest{
-		FileInfoClass:      FileDirectoryInformation,
+	req := &smb2.QueryDirectoryRequest{
+		FileInfoClass:      smb2.FileDirectoryInformation,
 		Flags:              0,
 		FileIndex:          0,
 		OutputBufferLength: uint32(f.maxTransactSize()),
@@ -2045,12 +2045,12 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(SMB2_QUERY_DIRECTORY, req)
+	res, err := f.sendRecv(smb2.SMB2_QUERY_DIRECTORY, req)
 	if err != nil {
 		return nil, err
 	}
 
-	r := QueryDirectoryResponseDecoder(res)
+	r := smb2.QueryDirectoryResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query directory response format"}
 	}
@@ -2058,7 +2058,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 	output := r.OutputBuffer()
 
 	for {
-		info := FileDirectoryInformationDecoder(output)
+		info := smb2.FileDirectoryInformationDecoder(output)
 		if info.IsInvalid() {
 			return nil, &InvalidResponseError{"broken query directory response format"}
 		}
@@ -2087,7 +2087,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 	}
 }
 
-func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
+func (f *File) queryInfo(req *smb2.QueryInfoRequest) (infoBytes []byte, err error) {
 	payloadSize := f.encodeSize(req.Input)
 	if payloadSize < int(req.OutputBufferLength) {
 		payloadSize = int(req.OutputBufferLength)
@@ -2109,12 +2109,12 @@ func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
 
 	req.FileId = f.fd
 
-	res, err := f.sendRecv(SMB2_QUERY_INFO, req)
+	res, err := f.sendRecv(smb2.SMB2_QUERY_INFO, req)
 	if err != nil {
 		return nil, err
 	}
 
-	r := QueryInfoResponseDecoder(res)
+	r := smb2.QueryInfoResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken query info response format"}
 	}
@@ -2122,7 +2122,7 @@ func (f *File) queryInfo(req *QueryInfoRequest) (infoBytes []byte, err error) {
 	return r.OutputBuffer(), nil
 }
 
-func (f *File) setInfo(req *SetInfoRequest) (err error) {
+func (f *File) setInfo(req *smb2.SetInfoRequest) (err error) {
 	payloadSize := f.encodeSize(req.Input)
 
 	if f.maxTransactSize() < payloadSize {
@@ -2141,14 +2141,14 @@ func (f *File) setInfo(req *SetInfoRequest) (err error) {
 
 	req.FileId = f.fd
 
-	req.InfoType = SMB2_0_INFO_FILE
+	req.InfoType = smb2.SMB2_0_INFO_FILE
 
-	res, err := f.sendRecv(SMB2_SET_INFO, req)
+	res, err := f.sendRecv(smb2.SMB2_SET_INFO, req)
 	if err != nil {
 		return err
 	}
 
-	r := SetInfoResponseDecoder(res)
+	r := smb2.SetInfoResponseDecoder(res)
 	if r.IsInvalid() {
 		return &InvalidResponseError{"broken set info response format"}
 	}
@@ -2156,7 +2156,7 @@ func (f *File) setInfo(req *SetInfoRequest) (err error) {
 	return nil
 }
 
-func (f *File) sendRecv(cmd uint16, req Packet) (res []byte, err error) {
+func (f *File) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
 	return f.fs.sendRecv(cmd, req)
 }
 
@@ -2182,17 +2182,17 @@ func (fs *FileStat) Size() int64 {
 func (fs *FileStat) Mode() os.FileMode {
 	var m os.FileMode
 
-	if fs.FileAttributes&FILE_ATTRIBUTE_DIRECTORY != 0 {
+	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_DIRECTORY != 0 {
 		m |= os.ModeDir | 0111
 	}
 
-	if fs.FileAttributes&FILE_ATTRIBUTE_READONLY != 0 {
+	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_READONLY != 0 {
 		m |= 0444
 	} else {
 		m |= 0666
 	}
 
-	if fs.FileAttributes&FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		m |= os.ModeSymlink
 	}
 
