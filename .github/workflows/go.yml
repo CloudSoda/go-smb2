@@ -32,7 +32,7 @@ jobs:
         go test -v -race ./...
     - uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.52.2
+        version: v1.63.4
         skip-cache: true
         args: --timeout=8m
   test_windows:
@@ -64,7 +64,7 @@ jobs:
         go test -v -race ./...
     - uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.52.2
+        version: v1.63.4
         skip-cache: true
         args: --timeout=8m
   
