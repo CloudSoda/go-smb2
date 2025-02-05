@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/cloudsoda/go-smb2/internal/crypto/cmac"
-	. "github.com/cloudsoda/go-smb2/internal/smb2"
+	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
 func TestSign(t *testing.T) {
@@ -33,7 +33,7 @@ func TestSign(t *testing.T) {
 	}
 	signer := cmac.New(ciph)
 
-	p := PacketCodec(pkt)
+	p := smb2.PacketCodec(pkt)
 
 	if !bytes.Equal(p.Signature(), signature) {
 		t.Error("fail")
