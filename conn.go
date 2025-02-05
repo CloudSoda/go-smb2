@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
-	. "github.com/cloudsoda/go-smb2/internal/smb2"
+	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
 // Negotiator contains options for func (*Dialer) Dial.
@@ -20,13 +20,13 @@ type Negotiator struct {
 	SpecifiedDialect      uint16   // if it's zero, clientDialects is used. (See feature.go for more details)
 }
 
-func (n *Negotiator) makeRequest() (*NegotiateRequest, error) {
-	req := new(NegotiateRequest)
+func (n *Negotiator) makeRequest() (*smb2.NegotiateRequest, error) {
+	req := new(smb2.NegotiateRequest)
 
 	if n.RequireMessageSigning {
-		req.SecurityMode = SMB2_NEGOTIATE_SIGNING_REQUIRED
+		req.SecurityMode = smb2.SMB2_NEGOTIATE_SIGNING_REQUIRED
 	} else {
-		req.SecurityMode = SMB2_NEGOTIATE_SIGNING_ENABLED
+		req.SecurityMode = smb2.SMB2_NEGOTIATE_SIGNING_ENABLED
 	}
 
 	req.Capabilities = clientCapabilities
@@ -40,16 +40,16 @@ func (n *Negotiator) makeRequest() (*NegotiateRequest, error) {
 		req.ClientGuid = n.ClientGuid
 	}
 
-	if n.SpecifiedDialect != UnknownSMB {
+	if n.SpecifiedDialect != smb2.UnknownSMB {
 		req.Dialects = []uint16{n.SpecifiedDialect}
 
 		switch n.SpecifiedDialect {
-		case SMB202:
-		case SMB210:
-		case SMB300:
-		case SMB302:
-		case SMB311:
-			hc := &HashContext{
+		case smb2.SMB202:
+		case smb2.SMB210:
+		case smb2.SMB300:
+		case smb2.SMB302:
+		case smb2.SMB311:
+			hc := &smb2.HashContext{
 				HashAlgorithms: clientHashAlgorithms,
 				HashSalt:       make([]byte, 32),
 			}
@@ -57,7 +57,7 @@ func (n *Negotiator) makeRequest() (*NegotiateRequest, error) {
 				return nil, &InternalError{err.Error()}
 			}
 
-			cc := &CipherContext{
+			cc := &smb2.CipherContext{
 				Ciphers: clientCiphers,
 			}
 
@@ -68,7 +68,7 @@ func (n *Negotiator) makeRequest() (*NegotiateRequest, error) {
 	} else {
 		req.Dialects = clientDialects
 
-		hc := &HashContext{
+		hc := &smb2.HashContext{
 			HashAlgorithms: clientHashAlgorithms,
 			HashSalt:       make([]byte, 32),
 		}
@@ -76,7 +76,7 @@ func (n *Negotiator) makeRequest() (*NegotiateRequest, error) {
 			return nil, &InternalError{err.Error()}
 		}
 
-		cc := &CipherContext{
+		cc := &smb2.CipherContext{
 			Ciphers: clientCiphers,
 		}
 
@@ -118,27 +118,27 @@ retry:
 		return nil, err
 	}
 
-	res, err := accept(SMB2_NEGOTIATE, pkt)
+	res, err := accept(smb2.SMB2_NEGOTIATE, pkt)
 	if err != nil {
 		return nil, err
 	}
 
-	r := NegotiateResponseDecoder(res)
+	r := smb2.NegotiateResponseDecoder(res)
 	if r.IsInvalid() {
 		return nil, &InvalidResponseError{"broken negotiate response format"}
 	}
 
-	if r.DialectRevision() == SMB2 {
-		n.SpecifiedDialect = SMB210
+	if r.DialectRevision() == smb2.SMB2 {
+		n.SpecifiedDialect = smb2.SMB210
 
 		goto retry
 	}
 
-	if n.SpecifiedDialect != UnknownSMB && n.SpecifiedDialect != r.DialectRevision() {
+	if n.SpecifiedDialect != smb2.UnknownSMB && n.SpecifiedDialect != r.DialectRevision() {
 		return nil, &InvalidResponseError{"unexpected dialect returned"}
 	}
 
-	conn.requireSigning = n.RequireMessageSigning || r.SecurityMode()&SMB2_NEGOTIATE_SIGNING_REQUIRED != 0
+	conn.requireSigning = n.RequireMessageSigning || r.SecurityMode()&smb2.SMB2_NEGOTIATE_SIGNING_REQUIRED != 0
 	conn.capabilities = clientCapabilities & r.Capabilities()
 	conn.dialect = r.DialectRevision()
 	conn.maxTransactSize = r.MaxTransactSize()
@@ -150,21 +150,21 @@ retry:
 	// conn.clientGuid = n.ClientGuid
 	// copy(conn.serverGuid[:], r.ServerGuid())
 
-	if conn.dialect != SMB311 {
+	if conn.dialect != smb2.SMB311 {
 		return conn, nil
 	}
 
 	// handle context for SMB311
 	list := r.NegotiateContextList()
 	for count := r.NegotiateContextCount(); count > 0; count-- {
-		ctx := NegotiateContextDecoder(list)
+		ctx := smb2.NegotiateContextDecoder(list)
 		if ctx.IsInvalid() {
 			return nil, &InvalidResponseError{"broken negotiate context format"}
 		}
 
 		switch ctx.ContextType() {
-		case SMB2_PREAUTH_INTEGRITY_CAPABILITIES:
-			d := HashContextDataDecoder(ctx.Data())
+		case smb2.SMB2_PREAUTH_INTEGRITY_CAPABILITIES:
+			d := smb2.HashContextDataDecoder(ctx.Data())
 			if d.IsInvalid() {
 				return nil, &InvalidResponseError{"broken hash context data format"}
 			}
@@ -178,7 +178,7 @@ retry:
 			conn.preauthIntegrityHashId = algs[0]
 
 			switch conn.preauthIntegrityHashId {
-			case SHA512:
+			case smb2.SHA512:
 				h := sha512.New()
 				h.Write(conn.preauthIntegrityHashValue[:])
 				h.Write(rr.pkt)
@@ -191,8 +191,8 @@ retry:
 			default:
 				return nil, &InvalidResponseError{"unknown hash algorithm"}
 			}
-		case SMB2_ENCRYPTION_CAPABILITIES:
-			d := CipherContextDataDecoder(ctx.Data())
+		case smb2.SMB2_ENCRYPTION_CAPABILITIES:
+			d := smb2.CipherContextDataDecoder(ctx.Data())
 			if d.IsInvalid() {
 				return nil, &InvalidResponseError{"broken cipher context data format"}
 			}
@@ -206,8 +206,8 @@ retry:
 			conn.cipherId = ciphs[0]
 
 			switch conn.cipherId {
-			case AES128CCM:
-			case AES128GCM:
+			case smb2.AES128CCM:
+			case smb2.AES128GCM:
 			default:
 				return nil, &InvalidResponseError{"unknown cipher algorithm"}
 			}
@@ -322,7 +322,7 @@ func (conn *conn) enableSession() {
 }
 
 //nolint:unused // appears to be legacy, unsure, so leaving for now
-func (conn *conn) sendRecv(cmd uint16, req Packet, ctx context.Context) (res []byte, err error) {
+func (conn *conn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (res []byte, err error) {
 	rr, err := conn.send(req, ctx)
 	if err != nil {
 		return nil, err
@@ -337,7 +337,7 @@ func (conn *conn) sendRecv(cmd uint16, req Packet, ctx context.Context) (res []b
 }
 
 func (conn *conn) loanCredit(payloadSize int, ctx context.Context) (creditCharge uint16, grantedPayloadSize int, err error) {
-	if conn.capabilities&SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
+	if conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		creditCharge = 1
 	} else {
 		creditCharge = uint16((payloadSize-1)/(64*1024) + 1)
@@ -358,11 +358,11 @@ func (conn *conn) chargeCredit(creditCharge uint16) {
 	conn.account.charge(creditCharge, creditCharge)
 }
 
-func (conn *conn) send(req Packet, ctx context.Context) (rr *requestResponse, err error) {
+func (conn *conn) send(req smb2.Packet, ctx context.Context) (rr *requestResponse, err error) {
 	return conn.sendWith(req, nil, ctx)
 }
 
-func (conn *conn) sendWith(req Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
+func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
 	conn.m.Lock()
 	defer conn.m.Unlock()
 
@@ -405,12 +405,12 @@ func (conn *conn) sendWith(req Packet, tc *treeConn, ctx context.Context) (rr *r
 	return rr, nil
 }
 
-func (conn *conn) makeRequestResponse(req Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
+func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
 	hdr := req.Header()
 
 	var msgId uint64
 
-	if _, ok := req.(*CancelRequest); !ok {
+	if _, ok := req.(*smb2.CancelRequest); !ok {
 		msgId = conn.sequenceWindow
 
 		creditCharge := hdr.CreditCharge
@@ -440,14 +440,14 @@ func (conn *conn) makeRequestResponse(req Packet, tc *treeConn, ctx context.Cont
 	req.Encode(pkt)
 
 	if s != nil {
-		if _, ok := req.(*SessionSetupRequest); !ok {
-			if s.sessionFlags&SMB2_SESSION_FLAG_ENCRYPT_DATA != 0 || (tc != nil && tc.shareFlags&SMB2_SHAREFLAG_ENCRYPT_DATA != 0) {
+		if _, ok := req.(*smb2.SessionSetupRequest); !ok {
+			if s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0 || (tc != nil && tc.shareFlags&smb2.SMB2_SHAREFLAG_ENCRYPT_DATA != 0) {
 				pkt, err = s.encrypt(pkt)
 				if err != nil {
 					return nil, &InternalError{err.Error()}
 				}
 			} else {
-				if s.sessionFlags&(SMB2_SESSION_FLAG_IS_GUEST|SMB2_SESSION_FLAG_IS_NULL) == 0 {
+				if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
 					pkt = s.sign(pkt)
 				}
 			}
@@ -526,7 +526,7 @@ func (conn *conn) runReciever() {
 				continue
 			}
 
-			p := PacketCodec(pkt)
+			p := smb2.PacketCodec(pkt)
 			if s := conn.session; s != nil {
 				if s.sessionId != p.SessionId() {
 					logger.Println("skip:", &InvalidResponseError{"unknown session id"})
@@ -547,7 +547,7 @@ func (conn *conn) runReciever() {
 		var next []byte
 
 		for {
-			p := PacketCodec(pkt)
+			p := smb2.PacketCodec(pkt)
 
 			if off := p.NextCommand(); off != 0 {
 				pkt, next = pkt[:off], pkt[off:]
@@ -591,7 +591,7 @@ exit:
 }
 
 func accept(cmd uint16, pkt []byte) (res []byte, err error) {
-	p := PacketCodec(pkt)
+	p := smb2.PacketCodec(pkt)
 	if command := p.Command(); cmd != command {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected command: %v, got %v", cmd, command)}
 	}
@@ -610,25 +610,25 @@ func accept(cmd uint16, pkt []byte) (res []byte, err error) {
 	}
 
 	switch cmd {
-	case SMB2_SESSION_SETUP:
+	case smb2.SMB2_SESSION_SETUP:
 		if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
 			return p.Data(), nil
 		}
-	case SMB2_QUERY_INFO:
+	case smb2.SMB2_QUERY_INFO:
 		if status == erref.STATUS_BUFFER_OVERFLOW {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
-	case SMB2_IOCTL:
+	case smb2.SMB2_IOCTL:
 		if status == erref.STATUS_BUFFER_OVERFLOW {
-			if !IoctlResponseDecoder(p.Data()).IsInvalid() {
+			if !smb2.IoctlResponseDecoder(p.Data()).IsInvalid() {
 				return p.Data(), &ResponseError{Code: uint32(status)}
 			}
 		}
-	case SMB2_READ:
+	case smb2.SMB2_READ:
 		if status == erref.STATUS_BUFFER_OVERFLOW {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
-	case SMB2_CHANGE_NOTIFY:
+	case smb2.SMB2_CHANGE_NOTIFY:
 		if status == erref.STATUS_NOTIFY_ENUM_DIR {
 			return nil, &ResponseError{Code: uint32(status)}
 		}
@@ -638,7 +638,7 @@ func accept(cmd uint16, pkt []byte) (res []byte, err error) {
 }
 
 func acceptError(status uint32, res []byte) error {
-	r := ErrorResponseDecoder(res)
+	r := smb2.ErrorResponseDecoder(res)
 	if r.IsInvalid() {
 		return &InvalidResponseError{"broken error response format"}
 	}
@@ -648,7 +648,7 @@ func acceptError(status uint32, res []byte) error {
 	if count := r.ErrorContextCount(); count != 0 {
 		data := make([][]byte, count)
 		for i := range data {
-			ctx := ErrorContextResponseDecoder(eData)
+			ctx := smb2.ErrorContextResponseDecoder(eData)
 			if ctx.IsInvalid() {
 				return &InvalidResponseError{"broken error context response format"}
 			}
@@ -669,14 +669,14 @@ func acceptError(status uint32, res []byte) error {
 }
 
 func (conn *conn) tryDecrypt(pkt []byte) ([]byte, error, bool) {
-	p := PacketCodec(pkt)
+	p := smb2.PacketCodec(pkt)
 	if p.IsInvalid() {
-		t := TransformCodec(pkt)
+		t := smb2.TransformCodec(pkt)
 		if t.IsInvalid() {
 			return nil, &InvalidResponseError{"broken packet header format"}, false
 		}
 
-		if t.Flags() != Encrypted {
+		if t.Flags() != smb2.Encrypted {
 			return nil, &InvalidResponseError{"encrypted flag is not on"}, false
 		}
 
@@ -696,12 +696,12 @@ func (conn *conn) tryDecrypt(pkt []byte) ([]byte, error, bool) {
 }
 
 func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
-	p := PacketCodec(pkt)
+	p := smb2.PacketCodec(pkt)
 
 	msgId := p.MessageId()
 
 	if msgId != 0xFFFFFFFFFFFFFFFF {
-		if p.Flags()&SMB2_FLAGS_SIGNED != 0 {
+		if p.Flags()&smb2.SMB2_FLAGS_SIGNED != 0 {
 			if conn.session == nil || conn.session.sessionId != p.SessionId() {
 				return &InvalidResponseError{"unknown session id returned"}
 			} else {
@@ -712,7 +712,7 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 		} else {
 			if conn.requireSigning && !isEncrypted {
 				if conn.session != nil {
-					if conn.session.sessionFlags&(SMB2_SESSION_FLAG_IS_GUEST|SMB2_SESSION_FLAG_IS_NULL) == 0 {
+					if conn.session.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
 						if conn.session.sessionId == p.SessionId() {
 							return &InvalidResponseError{"signing required"}
 						}
@@ -726,7 +726,7 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 }
 
 func (conn *conn) tryHandle(pkt []byte, e error) error {
-	p := PacketCodec(pkt)
+	p := smb2.PacketCodec(pkt)
 
 	msgId := p.MessageId()
 
