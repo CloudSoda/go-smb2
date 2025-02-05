@@ -1053,7 +1053,7 @@ func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFla
 	}
 
 	// we need to have at least READ_CONTROL in order to get the security descriptor
-	var access uint32 = smb2.READ_CONTROL // TODO: create a dedicated type for access mask
+	var access uint32 = smb2.READ_CONTROL
 	if info&SACLSecurityInformation != 0 {
 		access |= smb2.ACCESS_SYSTEM_SECURITY
 	}
