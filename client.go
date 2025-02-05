@@ -1075,7 +1075,7 @@ func (fs *Share) SecurityInfoRaw(name string, info SecurityInformationRequestFla
 	if err != nil {
 		return nil, &os.PathError{Op: op, Path: name, Err: fmt.Errorf("calling createFile: %w", err)}
 	}
-	defer f.Close() // in case we exit earlier
+	defer f.Close()
 
 	return f.SecurityInfoRaw(info)
 }
@@ -2295,10 +2295,6 @@ func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, er
 	}
 	infoBytes, err := f.queryInfo(req)
 	if err != nil {
-		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
-	}
-
-	if err := f.close(); err != nil {
 		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
 	}
 
