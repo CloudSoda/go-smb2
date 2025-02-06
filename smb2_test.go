@@ -914,3 +914,36 @@ func TestEcho(t *testing.T) {
 
 	require.NoError(t, session.Echo())
 }
+
+func TestSecurityDescriptor(t *testing.T) {
+	if fs == nil {
+		t.Skip()
+	}
+	testDir := fmt.Sprintf("testDir-%d-TestFile", os.Getpid())
+	err := fs.Mkdir(testDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
+
+	f, err := fs.Create(testDir + `\testFile`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		f.Close()
+		_ = fs.Remove(testDir + `\testFile`)
+	}()
+
+	flags := smb2.OwnerSecurityInformation | smb2.GroupSecurityInformation | smb2.DACLSecurityInformation
+	sd, err := f.SecurityInfo(flags)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sd == nil {
+		t.Error("unexpected nil SD")
+	}
+}
