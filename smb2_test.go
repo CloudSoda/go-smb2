@@ -943,7 +943,8 @@ func TestSecurityDescriptor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if sd == nil {
-		t.Error("unexpected nil SD")
+	err = f.SetSecurityInfo(flags, sd)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
