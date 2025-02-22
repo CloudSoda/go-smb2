@@ -1,10 +1,13 @@
 package smb2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
 )
+
+var ErrWindowsTooManyConnections = errors.New("No more connections can be made to this remote computer at this time because the computer has already accepted the maximum number of connections.")
 
 // TransportError represents a error come from net.Conn layer.
 type TransportError struct {
