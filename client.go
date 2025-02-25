@@ -64,6 +64,9 @@ context call Session.WithContext.
 func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
+		if strings.Contains(err.Error(), ErrWindowsTooManyConnectionsStr) {
+			return nil, ErrWindowsTooManyConnections
+		}
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
 
