@@ -3,7 +3,7 @@ module github.com/cloudsoda/go-smb2
 go 1.22
 
 require (
-	github.com/cloudsoda/sddl v0.0.0-20250224203730-98f426808d10
+	github.com/cloudsoda/sddl v0.0.0-20250224235906-926454e91efc
 	github.com/geoffgarside/ber v1.1.0
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/stretchr/testify v1.8.3
