@@ -6,11 +6,10 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/erref"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
@@ -501,12 +500,7 @@ func (conn *conn) runReceiver() {
 	for {
 		n, e := conn.t.ReadSize()
 		if e != nil {
-			if strings.Contains(e.Error(), ErrWindowsTooManyConnectionsStr) {
-				err = ErrWindowsTooManyConnections
-			} else {
-				err = &TransportError{e}
-			}
-
+			err = &TransportError{e}
 			goto exit
 		}
 
@@ -514,12 +508,7 @@ func (conn *conn) runReceiver() {
 
 		_, e = conn.t.Read(pkt)
 		if e != nil {
-			if strings.Contains(e.Error(), ErrWindowsTooManyConnectionsStr) {
-				err = ErrWindowsTooManyConnections
-			} else {
-				err = &TransportError{e}
-			}
-
+			err = &TransportError{e}
 			goto exit
 		}
 
@@ -672,9 +661,9 @@ func acceptError(status uint32, res []byte) error {
 
 			eData = eData[next:]
 		}
-		return &ResponseError{Code: status, data: data}
+		return &ResponseError{Code: status, Data: data}
 	}
-	return &ResponseError{Code: status, data: [][]byte{eData}}
+	return &ResponseError{Code: status, Data: [][]byte{eData}}
 }
 
 func (conn *conn) tryDecrypt(pkt []byte) ([]byte, error, bool) {

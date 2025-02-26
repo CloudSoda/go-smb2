@@ -39,7 +39,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/erref"
 )
 
 // ErrBadPattern indicates a pattern was malformed.

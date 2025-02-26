@@ -1,18 +1,10 @@
 package smb2
 
 import (
-	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/erref"
 )
-
-// ErrWindowsTooManyConnectionsStr is the error message that windows returns when there are more connections requested than the maximum allowed.
-const ErrWindowsTooManyConnectionsStr = "No more connections can be made to this remote computer at this time because the computer has already accepted the maximum number of connections."
-
-// ErrWindowsTooManyConnections represents the error that windows returns when there are more connections requested than the maximum allowed.
-var ErrWindowsTooManyConnections = errors.New(strings.ToLower(ErrWindowsTooManyConnectionsStr))
 
 // TransportError represents a error come from net.Conn layer.
 type TransportError struct {
@@ -46,9 +38,13 @@ func (err *InvalidResponseError) Error() string {
 // https://msdn.microsoft.com/en-au/library/cc704588.aspx
 type ResponseError struct {
 	Code uint32 // NTSTATUS
-	data [][]byte
+	Data [][]byte
 }
 
 func (err *ResponseError) Error() string {
 	return fmt.Sprintf("response error: %v", erref.NtStatus(err.Code))
+}
+
+func (err *ResponseError) NtStatus() erref.NtStatus {
+	return erref.NtStatus(err.Code)
 }

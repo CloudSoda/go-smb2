@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudsoda/go-smb2/internal/erref"
+	"github.com/cloudsoda/go-smb2/erref"
 	"github.com/cloudsoda/go-smb2/internal/msrpc"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 	"github.com/cloudsoda/go-smb2/internal/utf16le"
@@ -64,9 +64,6 @@ context call Session.WithContext.
 func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
-		if strings.Contains(err.Error(), ErrWindowsTooManyConnectionsStr) {
-			return nil, ErrWindowsTooManyConnections
-		}
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
 
@@ -1182,8 +1179,8 @@ func (fs *Share) createFileRec(name string, req *smb2.CreateRequest) (f *File, e
 		res, err := fs.sendRecv(smb2.SMB2_CREATE, req)
 		if err != nil {
 			if rerr, ok := err.(*ResponseError); ok && erref.NtStatus(rerr.Code) == erref.STATUS_STOPPED_ON_SYMLINK {
-				if len(rerr.data) > 0 {
-					name, err = evalSymlinkError(req.Name, rerr.data[0], fs.mapping)
+				if len(rerr.Data) > 0 {
+					name, err = evalSymlinkError(req.Name, rerr.Data[0], fs.mapping)
 					if err != nil {
 						return nil, err
 					}
