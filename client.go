@@ -771,14 +771,11 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: err}
 	}
 
-	fi, err := f.fileStat, nil
-	if e := f.close(); err == nil {
-		err = e
-	}
+	err = f.close()
 	if err != nil {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: err}
 	}
-	return fi, nil
+	return f.fileStat, nil
 }
 
 func (fs *Share) Truncate(name string, size int64) error {

@@ -48,3 +48,7 @@ func (err *ResponseError) Error() string {
 func (err *ResponseError) NtStatus() erref.NtStatus {
 	return erref.NtStatus(err.Code)
 }
+
+func (err *ResponseError) Unwrap() error {
+	return err.NtStatus()
+}
