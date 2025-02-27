@@ -1,10 +1,16 @@
 package smb2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
 )
+
+// status errors - add more if necessary
+
+// ErrRequestNotAccepted happens when the host cannot accept more connections.
+var ErrRequestNotAccepted = errors.New(erref.STATUS_REQUEST_NOT_ACCEPTED.Error())
 
 // TransportError represents a error come from net.Conn layer.
 type TransportError struct {

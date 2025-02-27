@@ -643,6 +643,10 @@ func acceptError(status uint32, res []byte) error {
 		return &InvalidResponseError{"broken error response format"}
 	}
 
+	if status == uint32(erref.STATUS_REQUEST_NOT_ACCEPTED) {
+		return ErrRequestNotAccepted
+	}
+
 	eData := r.ErrorData()
 
 	if count := r.ErrorContextCount(); count != 0 {
