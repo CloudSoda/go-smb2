@@ -14,7 +14,7 @@ import (
 
 	"github.com/cloudsoda/go-smb2/internal/crypto/ccm"
 	"github.com/cloudsoda/go-smb2/internal/crypto/cmac"
-	"github.com/cloudsoda/go-smb2/erref"
+	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 

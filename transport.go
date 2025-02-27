@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 )
 
 const (
@@ -39,6 +40,9 @@ func (t *directTCP) Write(p []byte) (n int, err error) {
 
 	_, err = t.conn.Write(bs)
 	if err != nil {
+		if strings.Contains(err.Error(), ErrWindowsTooManyConnectionsStr) {
+			return 0, ErrWindowsTooManyConnections
+		}
 		return 0, err
 	}
 
