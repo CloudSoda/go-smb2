@@ -6,7 +6,6 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -99,7 +98,7 @@ func (n *Negotiator) negotiate(t transport, a *account, ctx context.Context) (*c
 	}
 
 	go conn.runSender()
-	go conn.runReceiver()
+	go conn.runReciever()
 
 retry:
 	req, err := n.makeRequest()
@@ -495,17 +494,13 @@ func (conn *conn) runSender() {
 	}
 }
 
-func (conn *conn) runReceiver() {
+func (conn *conn) runReciever() {
 	var err error
 
 	for {
 		n, e := conn.t.ReadSize()
 		if e != nil {
-			if strings.Contains(e.Error(), ErrWindowsTooManyConnectionsStr) {
-				err = ErrWindowsTooManyConnections
-			} else {
-				err = &TransportError{e}
-			}
+			err = &TransportError{e}
 
 			goto exit
 		}
@@ -514,11 +509,7 @@ func (conn *conn) runReceiver() {
 
 		_, e = conn.t.Read(pkt)
 		if e != nil {
-			if strings.Contains(e.Error(), ErrWindowsTooManyConnectionsStr) {
-				err = ErrWindowsTooManyConnections
-			} else {
-				err = &TransportError{e}
-			}
+			err = &TransportError{e}
 
 			goto exit
 		}
