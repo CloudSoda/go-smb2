@@ -7,7 +7,10 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/erref"
 )
 
-var ErrWindowsTooManyConnections = errors.New("No more connections can be made to this remote computer at this time because the computer has already accepted the maximum number of connections.")
+// status errors - add more if necessary
+
+// ErrRequestNotAccepted happens when the host cannot accept more connections.
+var ErrRequestNotAccepted = errors.New(erref.STATUS_REQUEST_NOT_ACCEPTED.Error())
 
 // TransportError represents a error come from net.Conn layer.
 type TransportError struct {
