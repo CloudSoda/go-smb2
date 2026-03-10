@@ -209,8 +209,12 @@ func BenchmarkRoundTrip(b *testing.B) {
 			// session setup handshake; here we just need valid AES-128-GCM.
 			keyC2S := make([]byte, 16)
 			keyS2C := make([]byte, 16)
-			rand.Read(keyC2S)
-			rand.Read(keyS2C)
+			if _, err := rand.Read(keyC2S); err != nil {
+				panic(err)
+			}
+			if _, err := rand.Read(keyS2C); err != nil {
+				panic(err)
+			}
 
 			s := &session{
 				conn:           c,
