@@ -3,7 +3,7 @@ jobs:
   test_linux:
     strategy:
       matrix:
-        go: [1.23.3]
+        go: [1.26.1]
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/setup-go@v5
@@ -30,15 +30,13 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
-    - uses: golangci/golangci-lint-action@v6
-      with:
-        version: v1.63.4
-        skip-cache: true
-        args: --timeout=8m
+    - run: |
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        staticcheck ./...
   test_windows:
     strategy:
       matrix:
-        go: [1.23.3]
+        go: [1.26.1]
     runs-on: windows-2022
     steps:
     - uses: actions/setup-go@v5
@@ -62,9 +60,7 @@ jobs:
     - run: |
         cp ./.github/client_conf.json ./
         go test -v -race ./...
-    - uses: golangci/golangci-lint-action@v6
-      with:
-        version: v1.63.4
-        skip-cache: true
-        args: --timeout=8m
+    - run: |
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        staticcheck ./...
   
