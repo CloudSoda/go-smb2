@@ -933,15 +933,11 @@ func (fs *Share) ReadFile(filename string) ([]byte, error) {
 	var size int
 
 	if size64 <= maxInt {
-		size = int(size64)
-
 		// If a file claims a small size, read at least 512 bytes.
 		// In particular, files in Linux's /proc claim size 0 but
 		// then do not work right if read in small pieces,
 		// so an initial read of 1 byte would not work correctly.
-		if size < 512 {
-			size = 512
-		}
+		size = max(int(size64), 512)
 	} else {
 		size = maxInt
 	}
@@ -1163,7 +1159,7 @@ func (fs *Share) createFile(name string, req *smb2.CreateRequest, followSymlinks
 }
 
 func (fs *Share) createFileRec(name string, req *smb2.CreateRequest) (f *File, err error) {
-	for i := 0; i < clientMaxSymlinkDepth; i++ {
+	for range clientMaxSymlinkDepth {
 		req.CreditCharge, _, err = fs.loanCredit(0)
 		defer func() {
 			if err != nil {
@@ -1369,10 +1365,7 @@ const winMaxPayloadSize = 1024 * 1024 // windows system don't accept more than 1
 const singleCreditMaxPayloadSize = 64 * 1024
 
 func (f *File) maxReadSize() int {
-	size := int(f.fs.maxReadSize)
-	if size > winMaxPayloadSize {
-		size = winMaxPayloadSize
-	}
+	size := min(int(f.fs.maxReadSize), winMaxPayloadSize)
 	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
@@ -1382,10 +1375,7 @@ func (f *File) maxReadSize() int {
 }
 
 func (f *File) maxWriteSize() int {
-	size := int(f.fs.maxWriteSize)
-	if size > winMaxPayloadSize {
-		size = winMaxPayloadSize
-	}
+	size := min(int(f.fs.maxWriteSize), winMaxPayloadSize)
 	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
@@ -1395,10 +1385,7 @@ func (f *File) maxWriteSize() int {
 }
 
 func (f *File) maxTransactSize() int {
-	size := int(f.fs.maxTransactSize)
-	if size > winMaxPayloadSize {
-		size = winMaxPayloadSize
-	}
+	size := min(int(f.fs.maxTransactSize), winMaxPayloadSize)
 	if f.fs.conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		if size > singleCreditMaxPayloadSize {
 			size = singleCreditMaxPayloadSize
@@ -2127,10 +2114,7 @@ func (f *File) encodeSize(e smb2.Encoder) int {
 }
 
 func (f *File) ioctl(req *smb2.IoctlRequest) (output []byte, err error) {
-	payloadSize := f.encodeSize(req.Input) + int(req.OutputCount)
-	if payloadSize < int(req.MaxOutputResponse+req.MaxInputResponse) {
-		payloadSize = int(req.MaxOutputResponse + req.MaxInputResponse)
-	}
+	payloadSize := max(f.encodeSize(req.Input)+int(req.OutputCount), int(req.MaxOutputResponse+req.MaxInputResponse))
 
 	if f.maxTransactSize() < payloadSize {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
@@ -2236,10 +2220,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 }
 
 func (f *File) queryInfo(req *smb2.QueryInfoRequest) (infoBytes []byte, err error) {
-	payloadSize := f.encodeSize(req.Input)
-	if payloadSize < int(req.OutputBufferLength) {
-		payloadSize = int(req.OutputBufferLength)
-	}
+	payloadSize := max(f.encodeSize(req.Input), int(req.OutputBufferLength))
 
 	if f.maxTransactSize() < payloadSize {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
@@ -2420,6 +2401,6 @@ func (fs *FileStat) IsDir() bool {
 	return fs.Mode().IsDir()
 }
 
-func (fs *FileStat) Sys() interface{} {
+func (fs *FileStat) Sys() any {
 	return fs
 }

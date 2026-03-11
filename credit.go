@@ -67,7 +67,7 @@ func (a *account) charge(granted, requested uint16) {
 
 	a.m.Unlock()
 
-	for i := uint16(0); i < granted; i++ {
+	for range granted {
 		select {
 		case a.balance <- struct{}{}:
 		default:
