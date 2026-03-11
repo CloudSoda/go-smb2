@@ -321,7 +321,7 @@ func (conn *conn) enableSession() {
 	atomic.StoreInt32(&conn._useSession, 1)
 }
 
-//nolint:unused // appears to be legacy, unsure, so leaving for now
+//lint:ignore U1000 appears to be legacy, unsure, so leaving for now
 func (conn *conn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (res []byte, err error) {
 	rr, err := conn.send(req, ctx)
 	if err != nil {
