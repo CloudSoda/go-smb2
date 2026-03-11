@@ -1,5 +1,3 @@
-github.com/cloudsoda/sddl v0.0.0-20250224203730-98f426808d10 h1:hMxARgejEcCh95teDL1wqZZtntwt0FHPc9P3//F1u5w=
-github.com/cloudsoda/sddl v0.0.0-20250224203730-98f426808d10/go.mod h1:uvR42Hb/t52HQd7x5/ZLzZEK8oihrFpgnodIJ1vte2E=
 github.com/cloudsoda/sddl v0.0.0-20250224235906-926454e91efc h1:0xCWmFKBmarCqqqLeM7jFBSw/Or81UEElFqO8MY+GDs=
 github.com/cloudsoda/sddl v0.0.0-20250224235906-926454e91efc/go.mod h1:uvR42Hb/t52HQd7x5/ZLzZEK8oihrFpgnodIJ1vte2E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -51,8 +52,8 @@ type treeConnConfig struct {
 type config struct {
 	MaxCreditBalance uint16          `json:"max_credit_balance"`
 	Transport        transportConfig `json:"transport"`
-	Conn             connConfig      `json:"conn,omitempty"`
-	Session          sessionConfig   `json:"session,omitempty"`
+	Conn             connConfig      `json:"conn"`
+	Session          sessionConfig   `json:"session"`
 	TreeConn         treeConnConfig  `json:"tree_conn"`
 }
 
@@ -741,13 +742,7 @@ func TestListSharenames(t *testing.T) {
 	}
 	sort.Strings(names)
 	for _, expected := range []string{fsName, rfsName} {
-		found := false
-		for _, name := range names {
-			if name == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(names, expected)
 		if !found {
 			t.Errorf("couldn't find share name %s in %v", expected, names)
 		}

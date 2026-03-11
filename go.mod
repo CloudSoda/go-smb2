@@ -1,6 +1,6 @@
 module github.com/cloudsoda/go-smb2
 
-go 1.22
+go 1.26.1
 
 require (
 	github.com/cloudsoda/sddl v0.0.0-20250224235906-926454e91efc
