@@ -297,10 +297,11 @@ type conn struct {
 
 	account *account
 
-	rdone chan struct{}
-	wdone chan struct{}
-	write chan []byte
-	werr  chan error
+	rdone     chan struct{}
+	wdone     chan struct{}
+	write     chan []byte
+	werr      chan error
+	encodeBuf []byte // retained request encoding buffer; reused under conn.m
 
 	m sync.Mutex
 
@@ -435,7 +436,11 @@ func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context
 		}
 	}
 
-	pkt := make([]byte, req.Size())
+	needed := req.Size()
+	if cap(conn.encodeBuf) < needed {
+		conn.encodeBuf = make([]byte, needed)
+	}
+	pkt := conn.encodeBuf[:needed]
 
 	req.Encode(pkt)
 
