@@ -554,7 +554,8 @@ func (conn *conn) runReceiver() {
 		var isEncrypted bool
 
 		if hasSession {
-			pkt, e, isEncrypted = conn.tryDecrypt(pkt)
+			var pRb *recvBuf
+			pkt, pRb, e, isEncrypted = conn.tryDecrypt(pkt)
 			if e != nil {
 				conn.freePoolBuf(rb)
 
@@ -567,7 +568,7 @@ func (conn *conn) runReceiver() {
 				// Decrypt produced a new plaintext buffer; the
 				// original ciphertext buffer can be reused now.
 				conn.freePoolBuf(rb)
-				rb = nil
+				rb = pRb
 			}
 
 			p := smb2.PacketCodec(pkt)
@@ -732,31 +733,40 @@ func acceptError(status uint32, res []byte) error {
 	return &ResponseError{Code: status, data: [][]byte{eData}}
 }
 
-func (conn *conn) tryDecrypt(pkt []byte) ([]byte, error, bool) {
+func (conn *conn) tryDecrypt(pkt []byte) ([]byte, *recvBuf, error, bool) {
 	p := smb2.PacketCodec(pkt)
 	if p.IsInvalid() {
 		t := smb2.TransformCodec(pkt)
 		if t.IsInvalid() {
-			return nil, &InvalidResponseError{"broken packet header format"}, false
+			return nil, nil, &InvalidResponseError{"broken packet header format"}, false
 		}
 
 		if t.Flags() != smb2.Encrypted {
-			return nil, &InvalidResponseError{"encrypted flag is not on"}, false
+			return nil, nil, &InvalidResponseError{"encrypted flag is not on"}, false
 		}
 
 		if conn.session == nil || conn.session.sessionId != t.SessionId() {
-			return nil, &InvalidResponseError{"unknown session id returned"}, false
+			return nil, nil, &InvalidResponseError{"unknown session id returned"}, false
 		}
 
-		pkt, err := conn.session.decrypt(pkt)
+		// Get a pooled buffer for the decrypt work-buffer (ciphertext + tag).
+		cLen := len(t.EncryptedData()) + 16
+		pRb, ok := conn.recvPool.Get().(*recvBuf)
+		if !ok || cap(pRb.b) < cLen {
+			pRb = &recvBuf{b: make([]byte, cLen)}
+		}
+		c := pRb.b[:cLen]
+
+		pkt, err := conn.session.decrypt(pkt, c)
 		if err != nil {
-			return nil, &InvalidResponseError{err.Error()}, false
+			conn.freePoolBuf(pRb)
+			return nil, nil, &InvalidResponseError{err.Error()}, false
 		}
 
-		return pkt, nil, true
+		return pkt, pRb, nil, true
 	}
 
-	return pkt, nil, false
+	return pkt, nil, nil, false
 }
 
 func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
