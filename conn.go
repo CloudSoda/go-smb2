@@ -98,7 +98,7 @@ func (n *Negotiator) negotiate(t transport, a *account, ctx context.Context) (*c
 	}
 
 	go conn.runSender()
-	go conn.runReciever()
+	go conn.runReceiver()
 
 retry:
 	req, err := n.makeRequest()
@@ -227,6 +227,12 @@ retry:
 	return conn, nil
 }
 
+// recvBuf wraps a pooled receive buffer. Stored as *recvBuf in sync.Pool
+// so the pointer fits directly in the interface without boxing allocations.
+type recvBuf struct {
+	b []byte
+}
+
 type requestResponse struct {
 	msgId         uint64
 	asyncId       uint64
@@ -235,6 +241,17 @@ type requestResponse struct {
 	ctx           context.Context
 	recv          chan []byte
 	err           error
+	rb            *recvBuf   // pooled receive buffer wrapper; return via freeRecvBuf
+	bufPool       *sync.Pool // pool to return rb to
+}
+
+// freeRecvBuf returns the pooled receive buffer, if any. Safe to call
+// multiple times or when rb is nil.
+func (rr *requestResponse) freeRecvBuf() {
+	if rr.bufPool != nil && rr.rb != nil {
+		rr.bufPool.Put(rr.rb)
+		rr.rb = nil
+	}
 }
 
 type outstandingRequests struct {
@@ -301,7 +318,8 @@ type conn struct {
 	wdone     chan struct{}
 	write     chan []byte
 	werr      chan error
-	encodeBuf []byte // retained request encoding buffer; reused under conn.m
+	encodeBuf []byte    // retained request encoding buffer; reused under conn.m
+	recvPool  sync.Pool // reusable receive buffers
 
 	m sync.Mutex
 
@@ -505,7 +523,7 @@ func (conn *conn) runSender() {
 	}
 }
 
-func (conn *conn) runReciever() {
+func (conn *conn) runReceiver() {
 	var err error
 
 	for {
@@ -516,10 +534,16 @@ func (conn *conn) runReciever() {
 			goto exit
 		}
 
-		pkt := make([]byte, n)
+		rb, ok := conn.recvPool.Get().(*recvBuf)
+		if !ok || cap(rb.b) < n {
+			rb = &recvBuf{b: make([]byte, n)}
+		}
+		pkt := rb.b[:n]
 
 		_, e = conn.t.Read(pkt)
 		if e != nil {
+			conn.freePoolBuf(rb)
+
 			err = &TransportError{e}
 
 			goto exit
@@ -532,14 +556,25 @@ func (conn *conn) runReciever() {
 		if hasSession {
 			pkt, e, isEncrypted = conn.tryDecrypt(pkt)
 			if e != nil {
+				conn.freePoolBuf(rb)
+
 				logger.Println("skip:", e)
 
 				continue
 			}
 
+			if isEncrypted {
+				// Decrypt produced a new plaintext buffer; the
+				// original ciphertext buffer can be reused now.
+				conn.freePoolBuf(rb)
+				rb = nil
+			}
+
 			p := smb2.PacketCodec(pkt)
 			if s := conn.session; s != nil {
 				if s.sessionId != p.SessionId() {
+					conn.freePoolBuf(rb)
+
 					logger.Println("skip:", &InvalidResponseError{"unknown session id"})
 
 					continue
@@ -547,11 +582,24 @@ func (conn *conn) runReciever() {
 
 				if tc, ok := s.treeConnTables[p.TreeId()]; ok {
 					if tc.treeId != p.TreeId() {
+						conn.freePoolBuf(rb)
+
 						logger.Println("skip:", &InvalidResponseError{"unknown tree id"})
 
 						continue
 					}
 				}
+			}
+		}
+
+		// For non-compound, unencrypted packets the caller gets the
+		// pooled buffer via tryHandle → rr.rb. Compound packets
+		// share one buffer across multiple callers so we skip pooling.
+		var prb *recvBuf // pool recvBuf to pass to tryHandle
+		if rb != nil {
+			p := smb2.PacketCodec(pkt)
+			if p.NextCommand() == 0 {
+				prb = rb // single response — pass to caller
 			}
 		}
 
@@ -570,7 +618,8 @@ func (conn *conn) runReciever() {
 				e = conn.tryVerify(pkt, isEncrypted)
 			}
 
-			e = conn.tryHandle(pkt, e)
+			e = conn.tryHandle(pkt, e, prb)
+			prb = nil // only the first (single) response gets the buffer
 			if e != nil {
 				logger.Println("skip:", e)
 			}
@@ -740,7 +789,7 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 	return nil
 }
 
-func (conn *conn) tryHandle(pkt []byte, e error) error {
+func (conn *conn) tryHandle(pkt []byte, e error, rb *recvBuf) error {
 	p := smb2.PacketCodec(pkt)
 
 	msgId := p.MessageId()
@@ -748,20 +797,31 @@ func (conn *conn) tryHandle(pkt []byte, e error) error {
 	rr, ok := conn.outstandingRequests.pop(msgId)
 	switch {
 	case !ok:
+		conn.freePoolBuf(rb)
 		return &InvalidResponseError{"unknown message id returned"}
 	case e != nil:
 		rr.err = e
+		conn.freePoolBuf(rb)
 
 		close(rr.recv)
 	case erref.NtStatus(p.Status()) == erref.STATUS_PENDING:
 		rr.asyncId = p.AsyncId()
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
 		conn.outstandingRequests.set(msgId, rr)
+		conn.freePoolBuf(rb)
 	default:
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
+		rr.rb = rb
+		rr.bufPool = &conn.recvPool
 
 		rr.recv <- pkt
 	}
 
 	return nil
+}
+
+func (conn *conn) freePoolBuf(rb *recvBuf) {
+	if rb != nil {
+		conn.recvPool.Put(rb)
+	}
 }

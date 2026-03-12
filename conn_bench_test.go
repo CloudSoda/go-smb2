@@ -32,7 +32,7 @@ func newBenchConn(netConn net.Conn) (*conn, func()) {
 		capabilities:        smb2.SMB2_GLOBAL_CAP_LARGE_MTU,
 	}
 	go c.runSender()
-	go c.runReciever()
+	go c.runReceiver()
 
 	cleanup := func() {
 		c.rdone <- struct{}{}
@@ -319,6 +319,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 				if _, err := c.recv(rr); err != nil {
 					b.Fatal(err)
 				}
+				rr.freeRecvBuf()
 			}
 		})
 	}
@@ -381,6 +382,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 				if _, err := c.recv(rr); err != nil {
 					b.Fatal(err)
 				}
+				rr.freeRecvBuf()
 			}
 		})
 	}
