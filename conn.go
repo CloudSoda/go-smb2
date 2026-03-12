@@ -592,43 +592,43 @@ func (conn *conn) runReceiver() {
 			}
 		}
 
-		// For non-compound, unencrypted packets the caller gets the
-		// pooled buffer via tryHandle → rr.rb. Compound packets
-		// share one buffer across multiple callers so we skip pooling.
-		var prb *recvBuf // pool recvBuf to pass to tryHandle
-		if rb != nil {
-			p := smb2.PacketCodec(pkt)
-			if p.NextCommand() == 0 {
-				prb = rb // single response — pass to caller
-			}
-		}
-
-		var next []byte
-
-		for {
-			p := smb2.PacketCodec(pkt)
-
-			if off := p.NextCommand(); off != 0 {
-				pkt, next = pkt[:off], pkt[off:]
-			} else {
-				next = nil
-			}
-
+		p := smb2.PacketCodec(pkt)
+		if p.NextCommand() == 0 {
+			// Single response: transfer the pooled buffer to the caller.
 			if hasSession {
 				e = conn.tryVerify(pkt, isEncrypted)
 			}
-
-			e = conn.tryHandle(pkt, e, prb)
-			prb = nil // only the first (single) response gets the buffer
-			if e != nil {
+			if e = conn.tryHandle(pkt, e, rb); e != nil {
 				logger.Println("skip:", e)
 			}
+		} else {
+			// Compound response: sub-responses share the underlying
+			// buffer, so we cannot transfer ownership to any one caller.
+			// The buffer is intentionally not returned to the pool; it
+			// will be GC'd once all consumers finish with their pkt slices.
 
-			if next == nil {
-				break
+			var next []byte
+			for {
+				if off := p.NextCommand(); off != 0 {
+					pkt, next = pkt[:off], pkt[off:]
+				} else {
+					next = nil
+				}
+
+				if hasSession {
+					e = conn.tryVerify(pkt, isEncrypted)
+				}
+				if e = conn.tryHandle(pkt, e, nil); e != nil {
+					logger.Println("skip:", e)
+				}
+
+				if next == nil {
+					break
+				}
+
+				pkt = next
+				p = smb2.PacketCodec(pkt)
 			}
-
-			pkt = next
 		}
 	}
 
@@ -811,6 +811,12 @@ func (conn *conn) tryHandle(pkt []byte, e error, rb *recvBuf) error {
 		conn.freePoolBuf(rb)
 	default:
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
+
+		// Transfer ownership of the pooled receive buffer to the
+		// requestResponse so the caller can return it via freeRecvBuf
+		// after it has finished reading the response packet. (the
+		// error cases in this switch statement all free the buffer
+		// immediately)
 		rr.rb = rb
 		rr.bufPool = &conn.recvPool
 
