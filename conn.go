@@ -441,6 +441,7 @@ func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context
 		conn.encodeBuf = make([]byte, needed)
 	}
 	pkt := conn.encodeBuf[:needed]
+	clear(pkt)
 
 	req.Encode(pkt)
 
@@ -451,6 +452,7 @@ func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context
 				if cap(s.encryptBuf) < needed {
 					s.encryptBuf = make([]byte, needed)
 				}
+				clear(s.encryptBuf[:needed])
 				pkt, err = s.encrypt(pkt, s.encryptBuf[:needed])
 				if err != nil {
 					return nil, &InternalError{err.Error()}
