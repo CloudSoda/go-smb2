@@ -272,6 +272,8 @@ type session struct {
 	encrypter cipher.AEAD
 	decrypter cipher.AEAD
 
+	encryptBuf []byte // reusable ciphertext buffer; safe because conn.m serializes access
+
 	// applicationKey []byte
 }
 
@@ -368,9 +370,9 @@ func (s *session) verify(pkt []byte) (ok bool) {
 	return bytes.Equal(signature, p.Signature())
 }
 
-func (s *session) encrypt(pkt []byte) ([]byte, error) {
-	c := make([]byte, 52+len(pkt)+16)
-
+// encrypt encrypts pkt into c. len(c) must equal 52+len(pkt)+16.
+// Returns the wire-ready packet (c re-sliced to exclude the trailing tag).
+func (s *session) encrypt(pkt, c []byte) ([]byte, error) {
 	t := smb2.TransformCodec(c)
 
 	t.SetProtocolId()
