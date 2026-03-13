@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand"
 	"net"
 	"os"
@@ -916,6 +917,26 @@ func (fs *Share) ReadDir(dirname string) ([]os.FileInfo, error) {
 	return fis, nil
 }
 
+// ReadDirPlus returns all directory entries enriched with security descriptors,
+// sorted by name. For directories with many entries, prefer opening the
+// directory and calling File.ReaddirPlus incrementally.
+func (fs *Share) ReadDirPlus(dirname string, securityInfo SecurityInformationRequestFlags) ([]DirEntryPlus, error) {
+	f, err := fs.Open(dirname)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	entries, err := f.ReaddirPlus(-1, securityInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	return entries, nil
+}
+
 const (
 	intSize = 32 << (^uint(0) >> 63) // 32 or 64
 	maxInt  = 1<<(intSize-1) - 1
@@ -1535,6 +1556,65 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 	f.dirents = []os.FileInfo{}
 
 	return fi, nil
+}
+
+// ReaddirPlus reads directory entries enriched with security descriptors.
+// Like Readdir(n), it is incremental — each call returns the next n entries
+// with their security descriptors. Returns io.EOF after the last entry.
+//
+// Security queries use SMB2 compound requests (CREATE+QUERY_INFO+CLOSE batched
+// into single round-trips), sub-batching internally to respect credit limits.
+func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) ([]DirEntryPlus, error) {
+	fi, err := f.Readdir(n)
+	if len(fi) == 0 {
+		return nil, err
+	}
+
+	// Build relative paths for the compound security query.
+	// File names from Readdir are bare names; prefix with the directory path.
+	dir := f.name
+	paths := make([]string, len(fi))
+	for i, info := range fi {
+		if dir == "" {
+			paths[i] = info.Name()
+		} else {
+			paths[i] = dir + `\` + info.Name()
+		}
+	}
+
+	tc := f.fs.treeConn
+	secResults, secErr := tc.compoundSecurityInfoBatch(
+		paths, uint32(securityInfo), f.mapping, f.fs.ctx,
+	)
+	if secErr != nil {
+		// If the compound batch itself failed, return entries without security info
+		// and propagate the batch error on the first entry.
+		entries := make([]DirEntryPlus, len(fi))
+		for i, info := range fi {
+			entries[i] = DirEntryPlus{FileInfo: info, Err: secErr}
+		}
+		if err == nil {
+			err = secErr
+		}
+		return entries, err
+	}
+
+	entries := make([]DirEntryPlus, len(fi))
+	for i, info := range fi {
+		entries[i].FileInfo = info
+		if secResults[i].err != nil {
+			entries[i].Err = secResults[i].err
+		} else if secResults[i].data != nil {
+			sd, parseErr := sddl.FromBinary(secResults[i].data)
+			if parseErr != nil {
+				entries[i].Err = fmt.Errorf("parsing security descriptor for %s: %w", info.Name(), parseErr)
+			} else {
+				entries[i].SecurityDescriptor = sd
+			}
+		}
+	}
+
+	return entries, err
 }
 
 func (f *File) Readdirnames(n int) (names []string, err error) {
@@ -2418,3 +2498,18 @@ func (fs *FileStat) IsDir() bool {
 func (fs *FileStat) Sys() any {
 	return fs
 }
+
+// DirEntryPlus extends os.FileInfo with security metadata obtained via
+// compound requests. It implements fs.DirEntry.
+type DirEntryPlus struct {
+	os.FileInfo
+	SecurityDescriptor *sddl.SecurityDescriptor
+
+	Err error // non-nil if the security query failed for this entry
+}
+
+var _ fs.DirEntry = &DirEntryPlus{}
+
+func (d *DirEntryPlus) Type() os.FileMode          { return d.FileInfo.Mode().Type() }
+func (d *DirEntryPlus) Info() (os.FileInfo, error) { return d.FileInfo, nil }
+func (d *DirEntryPlus) Name() string               { return d.FileInfo.Name() }
