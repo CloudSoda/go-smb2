@@ -942,3 +942,152 @@ func TestSecurityDescriptor(t *testing.T) {
 		t.Error("unexpected nil SD")
 	}
 }
+
+func TestReaddirPlus(t *testing.T) {
+	if fs == nil {
+		t.Skip()
+	}
+	testDir := fmt.Sprintf("testDir-%d-TestReaddirPlus", os.Getpid())
+	err := fs.Mkdir(testDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
+
+	// Create enough files to exercise multi-batch incremental reads.
+	fileNames := []string{
+		"alpha.txt", "bravo.txt", "charlie.txt", "delta.txt",
+		"echo.txt", "foxtrot.txt", "golf.txt", "hotel.txt",
+		"india.txt", "juliet.txt",
+	}
+	for _, name := range fileNames {
+		f, err := fs.Create(testDir + `\` + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+
+	flags := smb2.OwnerSecurityInformation | smb2.GroupSecurityInformation | smb2.DACLSecurityInformation
+
+	t.Run("File.ReaddirPlus_all", func(t *testing.T) {
+		d, err := fs.Open(testDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+
+		entries, err := d.ReaddirPlus(-1, flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(entries) != len(fileNames) {
+			t.Fatalf("expected %d entries, got %d", len(fileNames), len(entries))
+		}
+
+		for _, e := range entries {
+			if e.Err != nil {
+				t.Errorf("entry %s: unexpected error: %v", e.Name(), e.Err)
+				continue
+			}
+			if e.SecurityDescriptor == nil {
+				t.Errorf("entry %s: expected non-nil SecurityDescriptor", e.Name())
+			}
+			if e.IsDir() {
+				t.Errorf("entry %s: expected file, got directory", e.Name())
+			}
+		}
+
+		// Verify EOF on subsequent call.
+		entries2, err := d.ReaddirPlus(1, flags)
+		require.Equal(t, io.EOF, err)
+		require.Empty(t, entries2)
+	})
+
+	t.Run("File.ReaddirPlus_incremental", func(t *testing.T) {
+		d, err := fs.Open(testDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+
+		var all []smb2.DirEntryPlus
+
+		// Read 3 at a time to exercise multiple batches.
+		const batchSize = 3
+		for {
+			entries, err := d.ReaddirPlus(batchSize, flags)
+			all = append(all, entries...)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) == 0 || len(entries) > batchSize {
+				t.Fatalf("expected 1-%d entries, got %d", batchSize, len(entries))
+			}
+		}
+
+		if len(all) != len(fileNames) {
+			t.Fatalf("expected %d total entries, got %d", len(fileNames), len(all))
+		}
+
+		for _, e := range all {
+			if e.Err != nil {
+				t.Errorf("entry %s: unexpected error: %v", e.Name(), e.Err)
+			}
+			if e.SecurityDescriptor == nil {
+				t.Errorf("entry %s: expected non-nil SecurityDescriptor", e.Name())
+			}
+		}
+	})
+
+	t.Run("Share.ReadDirPlus", func(t *testing.T) {
+		entries, err := fs.ReadDirPlus(testDir, flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(entries) != len(fileNames) {
+			t.Fatalf("expected %d entries, got %d", len(fileNames), len(entries))
+		}
+
+		// Share.ReadDirPlus sorts by name.
+		sortedNames := make([]string, len(fileNames))
+		copy(sortedNames, fileNames)
+		sort.Strings(sortedNames)
+
+		for i, name := range sortedNames {
+			if entries[i].Name() != name {
+				t.Errorf("entry %d: expected name %q, got %q", i, name, entries[i].Name())
+			}
+			if entries[i].Err != nil {
+				t.Errorf("entry %s: unexpected error: %v", name, entries[i].Err)
+				continue
+			}
+			if entries[i].SecurityDescriptor == nil {
+				t.Errorf("entry %s: expected non-nil SecurityDescriptor", name)
+			}
+		}
+	})
+
+	t.Run("empty_directory", func(t *testing.T) {
+		emptyDir := testDir + `\empty`
+		err := fs.Mkdir(emptyDir, 0755)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		entries, err := fs.ReadDirPlus(emptyDir, flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Errorf("expected 0 entries, got %d", len(entries))
+		}
+	})
+}

@@ -297,11 +297,12 @@ type conn struct {
 
 	account *account
 
-	rdone     chan struct{}
-	wdone     chan struct{}
-	write     chan []byte
-	werr      chan error
-	encodeBuf []byte // retained request encoding buffer; reused under conn.m
+	rdone         chan struct{}
+	wdone         chan struct{}
+	write         chan []byte
+	werr          chan error
+	encodeBuf     []byte // retained request encoding buffer; reused under conn.m
+	compoundSizes []int  // retained sizes buffer for compound requests; reused under conn.m
 
 	m sync.Mutex
 
@@ -404,6 +405,201 @@ func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (
 	}
 
 	return rr, nil
+}
+
+// compoundEntry describes a single request within a compound.
+type compoundEntry struct {
+	req     smb2.Packet
+	tc      *treeConn
+	related bool // set SMB2_FLAGS_RELATED_OPERATIONS on this request
+}
+
+// sendCompound serializes multiple SMB2 requests into a single transport frame
+// and sends them as a compound request. Related entries share a file handle via
+// the sentinel FileId. Returns one requestResponse per entry for receiving
+// individual responses.
+//
+// Caller must have already set CreditCharge on each entry's header (via loanCredit).
+func (conn *conn) sendCompound(entries []compoundEntry, ctx context.Context) ([]*requestResponse, error) {
+	conn.m.Lock()
+	defer conn.m.Unlock()
+
+	if conn.err != nil {
+		return nil, conn.err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	n := len(entries)
+
+	// Reuse retained sizes buffer.
+	if cap(conn.compoundSizes) < n {
+		conn.compoundSizes = make([]int, n)
+	}
+	sizes := conn.compoundSizes[:n]
+
+	// Phase 1: Set header fields and compute sizes.
+	var totalCreditCharge uint16
+
+	for i, entry := range entries {
+		hdr := entry.req.Header()
+
+		msgId := conn.sequenceWindow
+		creditCharge := hdr.CreditCharge
+		conn.sequenceWindow += uint64(creditCharge)
+		totalCreditCharge += creditCharge
+
+		hdr.MessageId = msgId
+
+		// Only the last request asks for new credits.
+		if i < n-1 {
+			hdr.CreditRequestResponse = 0
+		} else {
+			if hdr.CreditRequestResponse == 0 {
+				hdr.CreditRequestResponse = totalCreditCharge
+			}
+			hdr.CreditRequestResponse += conn.account.opening()
+		}
+
+		if entry.related {
+			hdr.Flags |= smb2.SMB2_FLAGS_RELATED_OPERATIONS
+		}
+
+		s := conn.session
+		if s != nil {
+			hdr.SessionId = s.sessionId
+			if entry.tc != nil {
+				hdr.TreeId = entry.tc.treeId
+			}
+		}
+
+		sizes[i] = entry.req.Size()
+	}
+
+	// Compute total buffer size with 8-byte alignment between requests.
+	totalSize := 0
+	for i, sz := range sizes {
+		if i < n-1 {
+			totalSize += (sz + 7) &^ 7
+		} else {
+			totalSize += sz
+		}
+	}
+
+	// Phase 2: Encode into conn.encodeBuf (retained compound buffer).
+	if cap(conn.encodeBuf) < totalSize {
+		conn.encodeBuf = make([]byte, totalSize)
+	}
+	compound := conn.encodeBuf[:totalSize]
+	clear(compound)
+
+	offset := 0
+	for i, entry := range entries {
+		pkt := compound[offset : offset+sizes[i]]
+		entry.req.Encode(pkt)
+
+		if i < n-1 {
+			aligned := (sizes[i] + 7) &^ 7
+			smb2.PacketCodec(pkt).SetNextCommand(uint32(aligned))
+			offset += aligned
+		} else {
+			offset += sizes[i]
+		}
+	}
+
+	// Phase 3: Sign or encrypt.
+	wirePkt := compound
+
+	s := conn.session
+	if s != nil {
+		encrypt := s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0
+		if !encrypt {
+			for _, entry := range entries {
+				if entry.tc != nil && entry.tc.shareFlags&smb2.SMB2_SHAREFLAG_ENCRYPT_DATA != 0 {
+					encrypt = true
+					break
+				}
+			}
+		}
+
+		if encrypt {
+			// Encrypt the entire compound as one unit using s.encryptBuf.
+			needed := 52 + len(compound) + 16
+			if cap(s.encryptBuf) < needed {
+				s.encryptBuf = make([]byte, needed)
+			}
+			clear(s.encryptBuf[:needed])
+			var err error
+			wirePkt, err = s.encrypt(compound, s.encryptBuf[:needed])
+			if err != nil {
+				return nil, &InternalError{err.Error()}
+			}
+		} else if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
+			// Sign each packet individually in-place.
+			// Per MS-SMB2 3.3.5.2.4, the server uses the NextCommand value as the
+			// message length for signature verification (8-byte aligned size), so
+			// non-last entries must be signed over the aligned length including padding.
+			off := 0
+			for i := range entries {
+				signLen := sizes[i]
+				if i < n-1 {
+					signLen = (sizes[i] + 7) &^ 7
+				}
+				pkt := compound[off : off+signLen]
+				s.sign(pkt)
+				off += signLen
+			}
+		}
+	}
+
+	// Phase 4: Register all requestResponses and send.
+	rrs := make([]*requestResponse, n)
+	off := 0
+	for i := range entries {
+		p := smb2.PacketCodec(compound[off : off+sizes[i]])
+		rrs[i] = &requestResponse{
+			msgId:         p.MessageId(),
+			creditRequest: p.CreditRequest(),
+			ctx:           ctx,
+			recv:          make(chan []byte, 1),
+		}
+		conn.outstandingRequests.set(rrs[i].msgId, rrs[i])
+
+		if i < n-1 {
+			off += (sizes[i] + 7) &^ 7
+		} else {
+			off += sizes[i]
+		}
+	}
+
+	select {
+	case conn.write <- wirePkt:
+		select {
+		case err := <-conn.werr:
+			if err != nil {
+				for _, rr := range rrs {
+					conn.outstandingRequests.pop(rr.msgId)
+				}
+				return nil, &TransportError{err}
+			}
+		case <-ctx.Done():
+			for _, rr := range rrs {
+				conn.outstandingRequests.pop(rr.msgId)
+			}
+			return nil, ctx.Err()
+		}
+	case <-ctx.Done():
+		for _, rr := range rrs {
+			conn.outstandingRequests.pop(rr.msgId)
+		}
+		return nil, ctx.Err()
+	}
+
+	return rrs, nil
 }
 
 func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
