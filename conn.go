@@ -13,6 +13,9 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
+// length of tag used to verify the integrity of the encrypted data
+const AES_AUTH_TAG_LEN = 16
+
 // Negotiator contains options for func (*Dialer) Dial.
 type Negotiator struct {
 	RequireMessageSigning bool     // enforce signing?
@@ -466,7 +469,7 @@ func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context
 	if s != nil {
 		if _, ok := req.(*smb2.SessionSetupRequest); !ok {
 			if s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0 || (tc != nil && tc.shareFlags&smb2.SMB2_SHAREFLAG_ENCRYPT_DATA != 0) {
-				needed := 52 + len(pkt) + 16
+				needed := 52 + len(pkt) + AES_AUTH_TAG_LEN
 				if cap(s.encryptBuf) < needed {
 					s.encryptBuf = make([]byte, needed)
 				}
@@ -750,7 +753,7 @@ func (conn *conn) tryDecrypt(pkt []byte) ([]byte, *recvBuf, error, bool) {
 		}
 
 		// Get a pooled buffer for the decrypt work-buffer (ciphertext + tag).
-		cLen := len(t.EncryptedData()) + 16
+		cLen := len(t.EncryptedData()) + AES_AUTH_TAG_LEN
 		pRb, ok := conn.recvPool.Get().(*recvBuf)
 		if !ok || cap(pRb.b) < cLen {
 			pRb = &recvBuf{b: make([]byte, cLen)}
