@@ -392,10 +392,15 @@ func (s *session) encrypt(pkt, c []byte) ([]byte, error) {
 	return c, nil
 }
 
-func (s *session) decrypt(pkt []byte) ([]byte, error) {
+// decrypt decrypts an SMB3 transform packet. c must be at least
+// len(EncryptedData)+len(Signature) bytes; decrypt copies the
+// ciphertext and tag into c and decrypts in-place.
+func (s *session) decrypt(pkt, c []byte) ([]byte, error) {
 	t := smb2.TransformCodec(pkt)
 
-	c := append(t.EncryptedData(), t.Signature()...)
+	c = c[:0]
+	c = append(c, t.EncryptedData()...)
+	c = append(c, t.Signature()...)
 
 	return s.decrypter.Open(
 		c[:0],

@@ -32,7 +32,7 @@ func newBenchConn(netConn net.Conn) (*conn, func()) {
 		capabilities:        smb2.SMB2_GLOBAL_CAP_LARGE_MTU,
 	}
 	go c.runSender()
-	go c.runReciever()
+	go c.runReceiver()
 
 	cleanup := func() {
 		c.rdone <- struct{}{}
@@ -67,6 +67,9 @@ func fakeServer(t transport, responseData []byte) {
 	}
 	respBuf := make([]byte, resp.Size())
 	resp.Encode(respBuf)
+	// Fix DataOffset: Encode writes 16 (offset within response body),
+	// but the decoder expects offset from packet start (64 + 16 = 80).
+	respBuf[64+2] = 80
 
 	reqBuf := make([]byte, bufSize)
 
@@ -81,9 +84,10 @@ func fakeServer(t transport, responseData []byte) {
 
 		p := smb2.PacketCodec(reqBuf[:n])
 
-		// Patch MessageId and CreditResponse into the template.
+		// Patch MessageId, Command, and CreditResponse into the template.
 		rp := smb2.PacketCodec(respBuf)
 		rp.SetMessageId(p.MessageId())
+		rp.SetCommand(p.Command())
 		rp.SetCreditResponse(p.CreditRequest())
 
 		if _, err := t.Write(respBuf); err != nil {
@@ -105,6 +109,9 @@ func fakeServerEncrypted(t transport, responseData []byte, dec, enc cipher.AEAD,
 	}
 	plainResp := make([]byte, resp.Size())
 	resp.Encode(plainResp)
+	// Fix DataOffset: Encode writes 16 (offset within response body),
+	// but the decoder expects offset from packet start (64 + 16 = 80).
+	plainResp[64+2] = 80
 
 	reqBuf := make([]byte, bufSize+52+16)        // room for transform header + payload + tag
 	decBuf := make([]byte, 0, bufSize+16)        // decrypt work buffer
@@ -154,6 +161,123 @@ func fakeServerEncrypted(t transport, responseData []byte, dec, enc cipher.AEAD,
 	}
 }
 
+// newBenchFile constructs a File wired through the production
+// Share → treeConn → session → conn chain, so benchmarks can
+// exercise readAt and other production code paths. The caller
+// must set up c.session before calling this.
+func newBenchFile(c *conn) *File {
+	tc := &treeConn{
+		session: c.session,
+	}
+
+	fs := &Share{
+		treeConn: tc,
+		ctx:      context.Background(),
+	}
+
+	return &File{
+		fs: fs,
+		fd: &smb2.FileId{},
+	}
+}
+
+func BenchmarkReadAt(b *testing.B) {
+	sizes := []struct {
+		name string
+		n    int
+	}{
+		{"1KB", 1 << 10},
+		{"64KB", 1 << 16},
+		{"1MB", 1 << 20},
+	}
+
+	for _, sz := range sizes {
+		b.Run("Plain/"+sz.name, func(b *testing.B) {
+			clientConn, serverConn := net.Pipe()
+			c, cleanup := newBenchConn(clientConn)
+			defer cleanup()
+
+			c.session = &session{
+				conn:           c,
+				treeConnTables: make(map[uint32]*treeConn),
+				sessionFlags:   smb2.SMB2_SESSION_FLAG_IS_GUEST,
+			}
+
+			responseData := make([]byte, sz.n)
+			go fakeServer(direct(serverConn), responseData)
+
+			f := newBenchFile(c)
+			buf := make([]byte, sz.n)
+
+			b.SetBytes(int64(sz.n))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				n, err := f.readAt(buf, 0)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if n != sz.n {
+					b.Fatalf("short read: %d != %d", n, sz.n)
+				}
+			}
+		})
+	}
+
+	for _, sz := range sizes {
+		b.Run("Encrypted/"+sz.name, func(b *testing.B) {
+			clientConn, serverConn := net.Pipe()
+			c, cleanup := newBenchConn(clientConn)
+			defer cleanup()
+
+			keyC2S := make([]byte, 16)
+			keyS2C := make([]byte, 16)
+			if _, err := rand.Read(keyC2S); err != nil {
+				panic(err)
+			}
+			if _, err := rand.Read(keyS2C); err != nil {
+				panic(err)
+			}
+
+			c.session = &session{
+				conn:           c,
+				treeConnTables: make(map[uint32]*treeConn),
+				sessionFlags:   smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA,
+				sessionId:      0xdeadbeef,
+				encrypter:      newGCM(keyC2S),
+				decrypter:      newGCM(keyS2C),
+			}
+			c.enableSession()
+
+			responseData := make([]byte, sz.n)
+			go fakeServerEncrypted(
+				direct(serverConn), responseData,
+				newGCM(keyC2S),
+				newGCM(keyS2C),
+				0xdeadbeef,
+			)
+
+			f := newBenchFile(c)
+			buf := make([]byte, sz.n)
+
+			b.SetBytes(int64(sz.n))
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				n, err := f.readAt(buf, 0)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if n != sz.n {
+					b.Fatalf("short read: %d != %d", n, sz.n)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkRoundTrip(b *testing.B) {
 	sizes := []struct {
 		name string
@@ -180,7 +304,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				req := &smb2.ReadRequest{
 					Length:       uint32(sz.n),
 					Offset:       0,
@@ -195,6 +319,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 				if _, err := c.recv(rr); err != nil {
 					b.Fatal(err)
 				}
+				rr.freeRecvBuf()
 			}
 		})
 	}
@@ -242,7 +367,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				req := &smb2.ReadRequest{
 					Length:       uint32(sz.n),
 					Offset:       0,
@@ -257,6 +382,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 				if _, err := c.recv(rr); err != nil {
 					b.Fatal(err)
 				}
+				rr.freeRecvBuf()
 			}
 		})
 	}
