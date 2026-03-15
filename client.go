@@ -97,12 +97,12 @@ func (d *Dialer) DialConn(ctx context.Context, tcpConn net.Conn, address string)
 
 	a := openAccount(maxCreditBalance)
 
-	conn, err := d.Negotiator.negotiate(direct(tcpConn), a, ctx)
+	conn, err := d.Negotiator.negotiate(ctx, direct(tcpConn), a)
 	if err != nil {
 		return nil, err
 	}
 
-	s, err := sessionSetup(conn, d.Initiator, ctx)
+	s, err := sessionSetup(ctx, conn, d.Initiator)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (c *Session) Mount(sharename string, opts ...MountOption) (*Share, error) {
 		opt(&options)
 	}
 
-	tc, err := treeConnect(c.s, sharename, 0, options.mapping, c.ctx)
+	tc, err := treeConnect(c.ctx, c.s, sharename, 0, options.mapping)
 	if err != nil {
 		return nil, err
 	}
@@ -1227,7 +1227,7 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 }
 
 func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
-	rr, err := fs.send(req, fs.ctx)
+	rr, err := fs.send(fs.ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1241,7 +1241,7 @@ func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
 }
 
 func (fs *Share) loanCredit(payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
-	return fs.session.conn.loanCredit(payloadSize, fs.ctx)
+	return fs.session.conn.loanCredit(fs.ctx, payloadSize)
 }
 
 type File struct {

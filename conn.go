@@ -86,7 +86,7 @@ func (n *Negotiator) makeRequest() (*smb2.NegotiateRequest, error) {
 	return req, nil
 }
 
-func (n *Negotiator) negotiate(t transport, a *account, ctx context.Context) (*conn, error) {
+func (n *Negotiator) negotiate(ctx context.Context, t transport, a *account) (*conn, error) {
 	conn := &conn{
 		t:                   t,
 		outstandingRequests: newOutstandingRequests(),
@@ -108,7 +108,7 @@ retry:
 
 	req.CreditCharge = 1
 
-	rr, err := conn.send(req, ctx)
+	rr, err := conn.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +323,8 @@ func (conn *conn) enableSession() {
 }
 
 //lint:ignore U1000 appears to be legacy, unsure, so leaving for now
-func (conn *conn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (res []byte, err error) {
-	rr, err := conn.send(req, ctx)
+func (conn *conn) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
+	rr, err := conn.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -337,14 +337,14 @@ func (conn *conn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (re
 	return accept(cmd, pkt)
 }
 
-func (conn *conn) loanCredit(payloadSize int, ctx context.Context) (creditCharge uint16, grantedPayloadSize int, err error) {
+func (conn *conn) loanCredit(ctx context.Context, payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
 	if conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		creditCharge = 1
 	} else {
 		creditCharge = uint16((payloadSize-1)/(64*1024) + 1)
 	}
 
-	creditCharge, isComplete, err := conn.account.loan(creditCharge, ctx)
+	creditCharge, isComplete, err := conn.account.loan(ctx, creditCharge)
 	if err != nil {
 		return creditCharge, 0, err
 	}
@@ -359,11 +359,11 @@ func (conn *conn) chargeCredit(creditCharge uint16) {
 	conn.account.charge(creditCharge, creditCharge)
 }
 
-func (conn *conn) send(req smb2.Packet, ctx context.Context) (rr *requestResponse, err error) {
-	return conn.sendWith(req, nil, ctx)
+func (conn *conn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
+	return conn.sendWith(ctx, req, nil)
 }
 
-func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
+func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn) (rr *requestResponse, err error) {
 	conn.m.Lock()
 	defer conn.m.Unlock()
 
@@ -378,7 +378,7 @@ func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (
 		// do nothing
 	}
 
-	rr, err = conn.makeRequestResponse(req, tc, ctx)
+	rr, err = conn.makeRequestResponse(ctx, req, tc)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +406,7 @@ func (conn *conn) sendWith(req smb2.Packet, tc *treeConn, ctx context.Context) (
 	return rr, nil
 }
 
-func (conn *conn) makeRequestResponse(req smb2.Packet, tc *treeConn, ctx context.Context) (rr *requestResponse, err error) {
+func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *treeConn) (rr *requestResponse, err error) {
 	hdr := req.Header()
 
 	var msgId uint64

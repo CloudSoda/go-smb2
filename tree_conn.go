@@ -19,7 +19,7 @@ type treeConn struct {
 	// maximalAccess uint32
 }
 
-func treeConnect(s *session, path string, flags uint16, mc utf16le.MapChars, ctx context.Context) (*treeConn, error) {
+func treeConnect(ctx context.Context, s *session, path string, flags uint16, mc utf16le.MapChars) (*treeConn, error) {
 	req := &smb2.TreeConnectRequest{
 		Flags:   flags,
 		Path:    path,
@@ -28,7 +28,7 @@ func treeConnect(s *session, path string, flags uint16, mc utf16le.MapChars, ctx
 
 	req.CreditCharge = 1
 
-	rr, err := s.send(req, ctx)
+	rr, err := s.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (tc *treeConn) disconnect(ctx context.Context) error {
 
 	req.CreditCharge = 1
 
-	res, err := tc.sendRecv(smb2.SMB2_TREE_DISCONNECT, req, ctx)
+	res, err := tc.sendRecv(ctx, smb2.SMB2_TREE_DISCONNECT, req)
 	if err != nil {
 		return err
 	}
@@ -79,8 +79,8 @@ func (tc *treeConn) disconnect(ctx context.Context) error {
 	return nil
 }
 
-func (tc *treeConn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (res []byte, err error) {
-	rr, err := tc.send(req, ctx)
+func (tc *treeConn) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
+	rr, err := tc.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +93,8 @@ func (tc *treeConn) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (
 	return accept(cmd, pkt)
 }
 
-func (tc *treeConn) send(req smb2.Packet, ctx context.Context) (rr *requestResponse, err error) {
-	return tc.sendWith(req, tc, ctx)
+func (tc *treeConn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
+	return tc.sendWith(ctx, req, tc)
 }
 
 func (tc *treeConn) recv(rr *requestResponse) (pkt []byte, err error) {
