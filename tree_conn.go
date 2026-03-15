@@ -43,12 +43,11 @@ func (tc *treeConn) compoundSecurityInfoBatch(
 		remaining := len(paths) - off
 
 		// Loan credits: 3 per file (CREATE + QUERY_INFO + CLOSE).
-		wanted := uint16(remaining * 3)
-		if max := uint16(cap(tc.account.balance)); wanted > max {
-			wanted = max
-		}
+		// Compute in int to avoid uint16 overflow on large directories,
+		// then clamp to the credit balance capacity.
+		wanted := min(remaining*3, cap(tc.account.balance))
 
-		granted, _, err := tc.account.loan(wanted, ctx)
+		granted, _, err := tc.account.loan(uint16(wanted), ctx)
 		if err != nil {
 			return nil, err
 		}
