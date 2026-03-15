@@ -18,7 +18,7 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
-func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error) {
+func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error) {
 	spnego := newSpnegoClient([]Initiator{i})
 
 	outputToken, err := spnego.InitSecContext()
@@ -43,7 +43,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 	req.CreditCharge = 1
 	req.CreditRequestResponse = conn.account.initRequest()
 
-	rr, err := conn.send(req, ctx)
+	rr, err := conn.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func sessionSetup(conn *conn, i Initiator, ctx context.Context) (*session, error
 
 		req.CreditRequestResponse = 0
 
-		rr, err = s.send(req, ctx)
+		rr, err = s.send(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +282,7 @@ func (s *session) logoff(ctx context.Context) error {
 
 	req.CreditCharge = 1
 
-	_, err := s.sendRecv(smb2.SMB2_LOGOFF, req, ctx)
+	_, err := s.sendRecv(ctx, smb2.SMB2_LOGOFF, req)
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func (s *session) echo(ctx context.Context) error {
 
 	req.CreditCharge = 1
 
-	res, err := s.sendRecv(smb2.SMB2_ECHO, req, ctx)
+	res, err := s.sendRecv(ctx, smb2.SMB2_ECHO, req)
 	if err != nil {
 		return err
 	}
@@ -311,8 +311,8 @@ func (s *session) echo(ctx context.Context) error {
 	return nil
 }
 
-func (s *session) sendRecv(cmd uint16, req smb2.Packet, ctx context.Context) (res []byte, err error) {
-	rr, err := s.send(req, ctx)
+func (s *session) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
+	rr, err := s.send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
