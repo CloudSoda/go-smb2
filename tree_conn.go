@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
@@ -142,55 +141,45 @@ func (tc *treeConn) sendSecurityBatch(
 		base := i * 3
 
 		// CREATE response.
-		createPkt, createErr := tc.session.recv(rrs[base])
+		createPkt, createErr := tc.recv(rrs[base])
 		if createErr != nil {
 			results[i].err = createErr
 			// Still drain QUERY_INFO and CLOSE responses.
-			tc.session.recv(rrs[base+1]) //nolint:errcheck
-			tc.session.recv(rrs[base+2]) //nolint:errcheck
+			tc.recv(rrs[base+1])
+			tc.recv(rrs[base+2])
 			continue
 		}
 		if _, createErr = accept(smb2.SMB2_CREATE, createPkt); createErr != nil {
 			results[i].err = createErr
-			tc.session.recv(rrs[base+1]) //nolint:errcheck
-			tc.session.recv(rrs[base+2]) //nolint:errcheck
+			tc.recv(rrs[base+1])
+			tc.recv(rrs[base+2])
 			continue
 		}
 
 		// QUERY_INFO response — extract security descriptor.
-		qiPkt, qiErr := tc.session.recv(rrs[base+1])
+		qiPkt, qiErr := tc.recv(rrs[base+1])
 		if qiErr != nil {
 			results[i].err = qiErr
-			tc.session.recv(rrs[base+2]) //nolint:errcheck
+			tc.recv(rrs[base+2])
 			continue
 		}
 		qiRes, qiErr := accept(smb2.SMB2_QUERY_INFO, qiPkt)
 		if qiErr != nil {
 			results[i].err = qiErr
-			tc.session.recv(rrs[base+2]) //nolint:errcheck
+			tc.recv(rrs[base+2])
 			continue
 		}
 
 		r := smb2.QueryInfoResponseDecoder(qiRes)
 		if r.IsInvalid() {
 			results[i].err = &InvalidResponseError{"broken query info response format"}
-			tc.session.recv(rrs[base+2]) //nolint:errcheck
+			tc.recv(rrs[base+2])
 			continue
 		}
 		results[i].data = r.OutputBuffer()
 
 		// CLOSE response — just drain it.
-		closePkt, closeErr := tc.session.recv(rrs[base+2])
-		if closeErr == nil {
-			if _, closeErr = accept(smb2.SMB2_CLOSE, closePkt); closeErr != nil {
-				// Close failure after successful query — log but don't fail the result.
-				if rerr, ok := closeErr.(*ResponseError); ok {
-					if erref.NtStatus(rerr.Code) != erref.STATUS_SUCCESS {
-						// Handle leaked but data was retrieved; not fatal.
-					}
-				}
-			}
-		}
+		tc.recv(rrs[base+2])
 	}
 
 	return nil
