@@ -1487,7 +1487,7 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, rr *request
 
 	req.CreditCharge = creditCharge
 
-	rr, err = f.fs.send(req, f.fs.ctx)
+	rr, err = f.fs.send(f.fs.ctx, req)
 	if err != nil {
 		return nil, false, nil, err
 	}

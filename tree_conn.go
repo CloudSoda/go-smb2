@@ -46,7 +46,7 @@ func (tc *treeConn) compoundSecurityInfoBatch(
 		// then clamp to the credit balance capacity.
 		wanted := min(remaining*3, cap(tc.account.balance))
 
-		granted, _, err := tc.account.loan(uint16(wanted), ctx)
+		granted, _, err := tc.account.loan(ctx, uint16(wanted))
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +131,7 @@ func (tc *treeConn) sendSecurityBatch(
 		}
 	}
 
-	rrs, err := tc.sendCompound(entries, ctx)
+	rrs, err := tc.sendCompound(ctx, entries)
 	if err != nil {
 		return err
 	}

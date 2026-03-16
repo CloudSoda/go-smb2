@@ -441,7 +441,7 @@ type compoundEntry struct {
 // individual responses.
 //
 // Caller must have already set CreditCharge on each entry's header (via loanCredit).
-func (conn *conn) sendCompound(entries []compoundEntry, ctx context.Context) ([]*requestResponse, error) {
+func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]*requestResponse, error) {
 	conn.m.Lock()
 	defer conn.m.Unlock()
 
