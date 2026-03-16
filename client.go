@@ -2,6 +2,7 @@ package smb2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1593,10 +1594,7 @@ func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) 
 		for i, info := range fi {
 			entries[i] = DirEntryPlus{FileInfo: info, Err: secErr}
 		}
-		if err == nil {
-			err = secErr
-		}
-		return entries, err
+		return entries, errors.Join(err, secErr)
 	}
 
 	entries := make([]DirEntryPlus, len(fi))
