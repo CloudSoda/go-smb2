@@ -1406,7 +1406,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 		case len(b)-n == 0:
 			return n, nil
 		case len(b)-n <= maxReadSize:
-			bs, isEOF, err := f.readAtChunk(len(b)-n, int64(n)+off)
+			bs, isEOF, rr, err := f.readAtChunk(len(b)-n, int64(n)+off)
 			if err != nil {
 				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
 					return n, nil
@@ -1415,12 +1415,13 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 			}
 
 			n += copy(b[n:], bs)
+			rr.freeRecvBuf()
 
 			if isEOF {
 				return n, nil
 			}
 		default:
-			bs, isEOF, err := f.readAtChunk(maxReadSize, int64(n)+off)
+			bs, isEOF, rr, err := f.readAtChunk(maxReadSize, int64(n)+off)
 			if err != nil {
 				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
 					return n, nil
@@ -1429,6 +1430,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 			}
 
 			n += copy(b[n:], bs)
+			rr.freeRecvBuf()
 
 			if isEOF {
 				return n, nil
@@ -1437,7 +1439,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 	}
 }
 
-func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) {
+func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, rr *requestResponse, err error) {
 	creditCharge, m, err := f.fs.loanCredit(n)
 	defer func() {
 		if err != nil {
@@ -1445,7 +1447,7 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) 
 		}
 	}()
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	req := &smb2.ReadRequest{
@@ -1463,19 +1465,31 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, err error) 
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(smb2.SMB2_READ, req)
+	rr, err = f.fs.send(req, f.fs.ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
+	}
+
+	pkt, err := f.fs.recv(rr)
+	if err != nil {
+		return nil, false, nil, err
+	}
+
+	res, err := accept(smb2.SMB2_READ, pkt)
+	if err != nil {
+		rr.freeRecvBuf()
+		return nil, false, nil, err
 	}
 
 	r := smb2.ReadResponseDecoder(res)
 	if r.IsInvalid() {
-		return nil, false, &InvalidResponseError{"broken read response format"}
+		rr.freeRecvBuf()
+		return nil, false, nil, &InvalidResponseError{"broken read response format"}
 	}
 
 	bs = r.Data()
 
-	return bs, len(bs) < m, nil
+	return bs, len(bs) < m, rr, nil
 }
 
 func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
