@@ -1597,19 +1597,28 @@ func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) 
 		return entries, errors.Join(err, secErr)
 	}
 
-	entries := make([]DirEntryPlus, len(fi))
+	entries := make([]DirEntryPlus, 0, len(fi))
 	for i, info := range fi {
-		entries[i].FileInfo = info
+		var sd *sddl.SecurityDescriptor
+		var err error
 		if secResults[i].err != nil {
-			entries[i].Err = secResults[i].err
+			if isFileDeleted(secResults[i].err) {
+				continue // file deleted between Readdir and security query
+			}
+			err = secResults[i].err
 		} else if secResults[i].data != nil {
-			sd, parseErr := sddl.FromBinary(secResults[i].data)
+			var parseErr error
+			sd, parseErr = sddl.FromBinary(secResults[i].data)
 			if parseErr != nil {
-				entries[i].Err = fmt.Errorf("parsing security descriptor for %s: %w", info.Name(), parseErr)
-			} else {
-				entries[i].SecurityDescriptor = sd
+				sd = nil // belt-and-suspenders assignment
+				err = fmt.Errorf("parsing security descriptor for %s: %w", info.Name(), parseErr)
 			}
 		}
+		entries = append(entries, DirEntryPlus{
+			FileInfo:           info,
+			SecurityDescriptor: sd,
+			Err:                err,
+		})
 	}
 
 	return entries, err
