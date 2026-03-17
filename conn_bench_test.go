@@ -198,9 +198,8 @@ func BenchmarkReadAt(b *testing.B) {
 			defer cleanup()
 
 			c.session.Store(&session{
-				conn:           c,
-				treeConnTables: make(map[uint32]*treeConn),
-				sessionFlags:   smb2.SMB2_SESSION_FLAG_IS_GUEST,
+				conn:         c,
+				sessionFlags: smb2.SMB2_SESSION_FLAG_IS_GUEST,
 			})
 
 			responseData := make([]byte, sz.n)
@@ -241,12 +240,11 @@ func BenchmarkReadAt(b *testing.B) {
 			}
 
 			c.session.Store(&session{
-				conn:           c,
-				treeConnTables: make(map[uint32]*treeConn),
-				sessionFlags:   smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA,
-				sessionId:      0xdeadbeef,
-				encrypter:      newGCM(keyC2S),
-				decrypter:      newGCM(keyS2C),
+				conn:         c,
+				sessionFlags: smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA,
+				sessionId:    0xdeadbeef,
+				encrypter:    newGCM(keyC2S),
+				decrypter:    newGCM(keyS2C),
 			})
 			c.useSession.Store(true)
 
@@ -342,12 +340,11 @@ func BenchmarkRoundTrip(b *testing.B) {
 			}
 
 			c.session.Store(&session{
-				conn:           c,
-				treeConnTables: make(map[uint32]*treeConn),
-				sessionFlags:   smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA,
-				sessionId:      0xdeadbeef,
-				encrypter:      newGCM(keyC2S),
-				decrypter:      newGCM(keyS2C),
+				conn:         c,
+				sessionFlags: smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA,
+				sessionId:    0xdeadbeef,
+				encrypter:    newGCM(keyC2S),
+				decrypter:    newGCM(keyS2C),
 			})
 			c.useSession.Store(true)
 
