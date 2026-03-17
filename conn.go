@@ -321,9 +321,9 @@ type conn struct {
 	wdone         chan struct{}
 	write         chan []byte
 	werr          chan error
-	recvPool  sync.Pool // reusable receive buffers
-	encodeBuf     []byte // retained request encoding buffer; reused under conn.m
-	compoundSizes []int  // retained sizes buffer for compound requests; reused under conn.m
+	recvPool      sync.Pool // reusable receive buffers
+	encodeBuf     []byte    // retained request encoding buffer; reused under conn.m
+	compoundSizes []int     // retained sizes buffer for compound requests; reused under conn.m
 
 	m sync.Mutex
 
