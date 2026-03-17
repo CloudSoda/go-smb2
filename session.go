@@ -81,10 +81,9 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 	}
 
 	s := &session{
-		conn:           conn,
-		treeConnTables: make(map[uint32]*treeConn),
-		sessionFlags:   sessionFlags,
-		sessionId:      p.SessionId(),
+		conn:         conn,
+		sessionFlags: sessionFlags,
+		sessionId:    p.SessionId(),
 	}
 
 	switch conn.dialect {
@@ -262,7 +261,6 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 
 type session struct {
 	*conn
-	treeConnTables            map[uint32]*treeConn
 	sessionFlags              uint16
 	sessionId                 uint64
 	preauthIntegrityHashValue [64]byte

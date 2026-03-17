@@ -768,16 +768,6 @@ func (conn *conn) runReceiver() {
 
 					continue
 				}
-
-				if tc, ok := s.treeConnTables[p.TreeId()]; ok {
-					if tc.treeId != p.TreeId() {
-						conn.freePoolBuf(rb)
-
-						logger.Println("skip:", &InvalidResponseError{"unknown tree id"})
-
-						continue
-					}
-				}
 			}
 		}
 
