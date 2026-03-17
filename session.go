@@ -115,7 +115,7 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 
 	// We set session before sending packet just for setting hdr.SessionId.
 	// But, we should not permit access from receiver until the session information is completed.
-	conn.session = s
+	conn.session.Store(s)
 
 	if status == erref.STATUS_MORE_PROCESSING_REQUIRED {
 		req.SecurityBuffer = outputToken
@@ -255,7 +255,7 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 	s.sessionFlags = r.SessionFlags()
 
 	// now, allow access from receiver
-	s.enableSession()
+	s.useSession.Store(true)
 
 	return s, nil
 }
