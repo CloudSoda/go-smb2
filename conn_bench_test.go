@@ -55,13 +55,14 @@ func newGCM(key []byte) cipher.AEAD {
 }
 
 // fakeServer reads SMB2 requests from t and writes back a fixed ReadResponse
-// with the matching MessageId. It reuses all buffers to avoid polluting the
-// benchmark with server-side allocations.
-func fakeServer(t transport, responseData []byte) {
+// with the matching MessageId and the given sessionId. It reuses all buffers
+// to avoid polluting the benchmark with server-side allocations.
+func fakeServer(t transport, responseData []byte, sessionId uint64) {
 	// Pre-build response template.
 	resp := &smb2.ReadResponse{
 		PacketHeader: smb2.PacketHeader{
-			Flags: smb2.SMB2_FLAGS_SERVER_TO_REDIR,
+			Flags:     smb2.SMB2_FLAGS_SERVER_TO_REDIR,
+			SessionId: sessionId,
 		},
 		Data: responseData,
 	}
@@ -203,7 +204,7 @@ func BenchmarkReadAt(b *testing.B) {
 			})
 
 			responseData := make([]byte, sz.n)
-			go fakeServer(direct(serverConn), responseData)
+			go fakeServer(direct(serverConn), responseData, 0)
 
 			f := newBenchFile(c)
 			buf := make([]byte, sz.n)
@@ -293,7 +294,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 			defer cleanup()
 
 			responseData := make([]byte, sz.n)
-			go fakeServer(direct(serverConn), responseData)
+			go fakeServer(direct(serverConn), responseData, 0)
 
 			fid := &smb2.FileId{}
 			ctx := context.Background()

@@ -328,7 +328,13 @@ func (s *session) recv(rr *requestResponse) (pkt []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if sessionId := smb2.PacketCodec(pkt).SessionId(); sessionId != s.sessionId {
+	// IBM i NetServer (iSeries/AS400) assigns the session ID only in the
+	// STATUS_MORE_PROCESSING_REQUIRED response, while the client's sessionId
+	// is still 0. Adopt the server's session ID in that case.
+	sessionId := smb2.PacketCodec(pkt).SessionId()
+	if s.sessionId == 0 {
+		s.sessionId = sessionId
+	} else if sessionId != s.sessionId {
 		return nil, &InvalidResponseError{fmt.Sprintf("expected session id: %v, got %v", s.sessionId, sessionId)}
 	}
 	return pkt, err
