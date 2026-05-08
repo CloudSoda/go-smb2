@@ -336,21 +336,6 @@ type conn struct {
 	useSession atomic.Bool
 }
 
-//lint:ignore U1000 appears to be legacy, unsure, so leaving for now
-func (conn *conn) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
-	rr, err := conn.send(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	pkt, err := conn.recv(rr)
-	if err != nil {
-		return nil, err
-	}
-
-	return accept(cmd, pkt)
-}
-
 func (conn *conn) loanCredit(ctx context.Context, payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
 	if conn.capabilities&smb2.SMB2_GLOBAL_CAP_LARGE_MTU == 0 {
 		creditCharge = 1
@@ -952,32 +937,45 @@ func (conn *conn) tryDecrypt(pkt []byte) ([]byte, *recvBuf, error, bool) {
 func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 	p := smb2.PacketCodec(pkt)
 
-	msgId := p.MessageId()
-	s := conn.session.Load()
+	msgID := p.MessageId()
 
-	if msgId != 0xFFFFFFFFFFFFFFFF {
-		if p.Flags()&smb2.SMB2_FLAGS_SIGNED != 0 {
-			if s == nil || s.sessionId != p.SessionId() {
-				return &InvalidResponseError{"unknown session id returned"}
-			} else {
-				if !s.verify(pkt) {
-					return &InvalidResponseError{"unverified packet returned"}
-				}
-			}
-		} else {
-			if conn.requireSigning && !isEncrypted {
-				if s != nil {
-					if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
-						if s.sessionId == p.SessionId() {
-							return &InvalidResponseError{"signing required"}
-						}
-					}
-				}
-			}
-		}
+	// MS-SMB2 3.2.5.1.3 states that the client MUST skip signature processing if:
+	// - MessageId is 0xFFFFFFFFFFFFFFFF
+	// - Status in the SMB2 header is STATUS_PENDING
+	// 		- 3.3.4.1.1 says servers should skip signing interim responses to async requests - STATUS_PENDING is an interim response
+	// - Client is using the SMB 3.x dialect and the message was successfully decrypted+authenticated (isEncrypted=true)
+	if msgID == 0xFFFFFFFFFFFFFFFF {
+		return nil
+	}
+	if erref.NtStatus(p.Status()) == erref.STATUS_PENDING {
+		return nil
+	}
+	if !conn.requireSigning || isEncrypted {
+		return nil
 	}
 
-	return nil
+	s := conn.session.Load()
+	if s == nil {
+		return &InvalidResponseError{"packet received before session established"}
+	}
+	if s.sessionId != p.SessionId() {
+		return &InvalidResponseError{"packet for unknown session"}
+	}
+
+	// guest and null sessions can't produce signatures, so they don't need to be verified
+	if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) != 0 {
+		return nil
+	}
+
+	// If the signature flag is set, then we verify it
+	if p.Flags()&smb2.SMB2_FLAGS_SIGNED != 0 {
+		if !s.verify(pkt) {
+			return &InvalidResponseError{"packet failed signature verification"}
+		}
+		return nil
+	}
+
+	return &InvalidResponseError{"signing required"}
 }
 
 func (conn *conn) tryHandle(pkt []byte, e error, rb *recvBuf) error {
