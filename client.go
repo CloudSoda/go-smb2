@@ -739,7 +739,7 @@ func (fs *Share) Lstat(name string) (os.FileInfo, error) {
 	}
 
 	fi, err := f.fileStat, nil
-	if e := f.close(); err == nil {
+	if e := f.close(); e == nil {
 		err = e
 	}
 	if err != nil {
@@ -774,7 +774,7 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 	}
 
 	fi, err := f.fileStat, nil
-	if e := f.close(); err == nil {
+	if e := f.close(); e == nil {
 		err = e
 	}
 	if err != nil {
@@ -1383,8 +1383,10 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 	return n, nil
 }
 
-const winMaxPayloadSize = 1024 * 1024 // windows system don't accept more than 1M bytes request even though they tell us maxXXXSize > 1M
-const singleCreditMaxPayloadSize = 64 * 1024
+const (
+	winMaxPayloadSize          = 1024 * 1024 // windows system don't accept more than 1M bytes request even though they tell us maxXXXSize > 1M
+	singleCreditMaxPayloadSize = 64 * 1024
+)
 
 func (f *File) maxReadSize() int {
 	size := min(int(f.fs.maxReadSize), winMaxPayloadSize)
