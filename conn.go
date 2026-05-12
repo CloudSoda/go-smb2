@@ -950,7 +950,7 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 	if erref.NtStatus(p.Status()) == erref.STATUS_PENDING {
 		return nil
 	}
-	if !conn.requireSigning || isEncrypted {
+	if isEncrypted {
 		return nil
 	}
 
@@ -967,15 +967,16 @@ func (conn *conn) tryVerify(pkt []byte, isEncrypted bool) error {
 		return nil
 	}
 
-	// If the signature flag is set, then we verify it
-	if p.Flags()&smb2.SMB2_FLAGS_SIGNED != 0 {
+	// verify if 1) the connection requires signing or 2) if the message itself is signed
+	if conn.requireSigning || p.Flags()&smb2.SMB2_FLAGS_SIGNED != 0 {
 		if !s.verify(pkt) {
 			return &InvalidResponseError{"packet failed signature verification"}
 		}
 		return nil
 	}
 
-	return &InvalidResponseError{"signing required"}
+	// the message was not signed AND signing is not required
+	return nil
 }
 
 func (conn *conn) tryHandle(pkt []byte, e error, rb *recvBuf) error {

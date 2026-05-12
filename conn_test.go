@@ -1,7 +1,6 @@
 package smb2
 
 import (
-	"bytes"
 	"context"
 	"crypto/aes"
 	"net"
@@ -72,7 +71,7 @@ func TestSessionRecv(t *testing.T) {
 
 func TestTryVerify(t *testing.T) {
 	// builds an SMB2 response header
-	makeHdr := func(status uint32, flags uint32, sessionId, msgID uint64) []byte {
+	makeHdr := func(status uint32, flags uint32, sessionId, msgID uint64) smb2.PacketCodec {
 		pkt := make([]byte, 64)
 		p := smb2.PacketCodec(pkt)
 		p.SetProtocolId()
@@ -107,18 +106,51 @@ func TestTryVerify(t *testing.T) {
 
 	t.Run("regular message, signed flag, bad signature - should fail", func(t *testing.T) {
 		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR|smb2.SMB2_FLAGS_SIGNED, sessionID, 21)
-		smb2.PacketCodec(pkt).SetSignature(bytes.Repeat([]byte{0x00}, 16))
+		pkt.SetSignature(zero[:])
 		require.IsType(&InvalidResponseError{}, c.tryVerify(pkt, false))
 	})
 
 	t.Run("regular message, unset signed flag, bad signature - should fail", func(t *testing.T) {
 		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR, sessionID, smb2.SMB2_CREATE)
-		smb2.PacketCodec(pkt).SetSignature(bytes.Repeat([]byte{0x00}, 16))
-		require.IsType(&InvalidResponseError{}, c.tryVerify(pkt, false))
+		pkt.SetSignature(zero[:])
+		err := c.tryVerify(pkt, false)
+		require.IsType(&InvalidResponseError{}, err)
+		require.ErrorContains(err, "packet failed signature verification")
 	})
 
 	t.Run("OPLOCK_BREAK should skip verification", func(t *testing.T) {
 		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR, sessionID, 0xFFFFFFFFFFFFFFFF)
+		require.NoError(c.tryVerify(pkt, false))
+	})
+
+	t.Run("unsigned message, signing not negotiated - succeeds", func(t *testing.T) {
+		// we need a connection that doesn't require signing for this subtest
+		c := &conn{
+			outstandingRequests: newOutstandingRequests(),
+			dialect:             smb2.SMB302,
+		}
+		s := &session{conn: c, sessionId: sessionID}
+		c.session.Store(s)
+
+		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR, sessionID, smb2.SMB2_CREATE)
+		require.NoError(c.tryVerify(pkt, false))
+	})
+
+	t.Run("encrypted message without signature, succeeds", func(t *testing.T) {
+		// pass an invalid session id, and use a connection that requires
+		// signing to make sure we're getting an early return due to encryption
+		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR, 0, smb2.SMB2_CREATE)
+		require.NoError(c.tryVerify(pkt, true))
+	})
+
+	t.Run("signed message succeeds", func(t *testing.T) {
+		pkt := makeHdr(0, smb2.SMB2_FLAGS_SERVER_TO_REDIR|smb2.SMB2_FLAGS_SIGNED, sessionID, smb2.SMB2_CREATE)
+
+		// actually sign the packet
+		verifier := cmac.New(ciph)
+		verifier.Write(pkt)
+		pkt.SetSignature(verifier.Sum(nil))
+
 		require.NoError(c.tryVerify(pkt, false))
 	})
 }
