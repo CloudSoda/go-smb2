@@ -699,6 +699,20 @@ func (conn *conn) runSender() {
 func (conn *conn) runReceiver() {
 	var err error
 
+	// Defence in depth: convert any unexpected panic (e.g. from a
+	// malformed packet that slips past explicit validation) into a clean
+	// connection-shutdown error rather than a process crash.
+	defer func() {
+		if r := recover(); r != nil {
+			err = &InvalidResponseError{fmt.Sprintf("receiver panic: %v", r)}
+			conn.m.Lock()
+			defer conn.m.Unlock()
+			conn.outstandingRequests.shutdown(err)
+			conn.err = err
+			close(conn.wdone)
+		}
+	}()
+
 	for {
 		n, e := conn.t.ReadSize()
 		if e != nil {
@@ -773,10 +787,31 @@ func (conn *conn) runReceiver() {
 
 			var next []byte
 			for {
-				if off := p.NextCommand(); off != 0 {
+				off := p.NextCommand()
+				if off != 0 {
+					// Validate the offset before slicing: it must be
+					// 8-byte aligned, at least 64 bytes (minimum SMB2
+					// header), and within the remaining buffer.
+					if off < 64 || off > uint32(len(pkt)) {
+						err = &InvalidResponseError{"NextCommand offset out of bounds"}
+						goto exit
+					}
 					pkt, next = pkt[:off], pkt[off:]
 				} else {
 					next = nil
+				}
+
+				// Validate the current segment before handing it to
+				// tryVerify / tryHandle, which read fixed header offsets.
+				if smb2.PacketCodec(pkt).IsInvalid() {
+					e = &InvalidResponseError{"invalid chained packet header"}
+					logger.Println("skip:", e)
+					if next == nil {
+						break
+					}
+					pkt = next
+					p = smb2.PacketCodec(pkt)
+					continue
 				}
 
 				if hasSession {
