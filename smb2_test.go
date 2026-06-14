@@ -94,12 +94,16 @@ func connect(f func()) {
 			panic("unsupported session type")
 		}
 
+		neg := smb2.Negotiator{
+			RequireMessageSigning: cfg.Conn.RequireMessageSigning,
+		}
+		if cfg.Conn.SpecifiedDialect != 0 {
+			neg.MinDialect = cfg.Conn.SpecifiedDialect
+			neg.MaxDialect = cfg.Conn.SpecifiedDialect
+		}
 		dialer = &smb2.Dialer{
 			MaxCreditBalance: cfg.MaxCreditBalance,
-			Negotiator: smb2.Negotiator{
-				RequireMessageSigning: cfg.Conn.RequireMessageSigning,
-				SpecifiedDialect:      cfg.Conn.SpecifiedDialect,
-			},
+			Negotiator:       neg,
 			Initiator: &smb2.NTLMInitiator{
 				User:        cfg.Session.User,
 				Password:    cfg.Session.Password,
