@@ -2,6 +2,7 @@ package spnego
 
 import (
 	"encoding/asn1"
+	"errors"
 
 	"github.com/geoffgarside/ber"
 )
@@ -149,11 +150,26 @@ func EncodeNegTokenResp(state asn1.Enumerated, typ asn1.ObjectIdentifier, token,
 		return nil, err
 	}
 
+	// bs is an ASN.1 DER/BER value whose first byte is the tag (0x60 for
+	// APPLICATION 0) and whose subsequent bytes encode the length. We need
+	// to skip the tag+length prefix to return the inner SEQUENCE payload.
+	//
+	// Defensive bounds checks are required here even though bs is produced
+	// by asn1.Marshal (library-generated): a future caller could pass short
+	// or empty input, and the BER long-form length field can encode values
+	// up to 127 additional bytes, making skip grow well past len(bs).
+	if len(bs) < 2 {
+		return nil, errors.New("spnego: EncodeNegTokenResp: marshalled output too short")
+	}
 	skip := 1
 	if bs[skip] < 128 {
 		skip += 1
 	} else {
-		skip += int(bs[skip]) - 128 + 1
+		n := int(bs[skip]) - 128 + 1
+		skip += n
+	}
+	if skip > len(bs) {
+		return nil, errors.New("spnego: EncodeNegTokenResp: length prefix exceeds buffer")
 	}
 
 	return bs[skip:], nil
