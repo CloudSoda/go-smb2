@@ -149,6 +149,18 @@ retry:
 	conn.maxWriteSize = r.MaxWriteSize()
 	conn.sequenceWindow = 1
 
+	// Store values sent in the NEGOTIATE request for later
+	// FSCTL_VALIDATE_NEGOTIATE_INFO on SMB 3.0/3.0.2 sessions.
+	conn.negotiateClientGuid = req.ClientGuid
+	conn.negotiateSecurityMode = req.SecurityMode
+	conn.negotiateDialects = req.Dialects
+
+	// Store the raw server-side values from the NEGOTIATE response so they can
+	// be cross-checked against the signed FSCTL_VALIDATE_NEGOTIATE_INFO reply.
+	conn.serverCapabilities = r.Capabilities()
+	conn.serverSecurityMode = r.SecurityMode()
+	copy(conn.serverGuid[:], r.ServerGuid())
+
 	// conn.gssNegotiateToken = r.SecurityBuffer()
 	// conn.clientGuid = n.ClientGuid
 	// copy(conn.serverGuid[:], r.ServerGuid())
@@ -314,6 +326,16 @@ type conn struct {
 	preauthIntegrityHashId    uint16
 	preauthIntegrityHashValue [64]byte
 	cipherId                  uint16
+
+	// Values sent in the NEGOTIATE request (needed for FSCTL_VALIDATE_NEGOTIATE_INFO).
+	negotiateClientGuid   [16]byte
+	negotiateSecurityMode uint16
+	negotiateDialects     []uint16
+
+	// Values received in the NEGOTIATE response (needed for FSCTL_VALIDATE_NEGOTIATE_INFO verification).
+	serverCapabilities uint32
+	serverSecurityMode uint16
+	serverGuid         [16]byte
 
 	account *account
 

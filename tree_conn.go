@@ -1,6 +1,7 @@
 package smb2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -235,7 +236,95 @@ func treeConnect(ctx context.Context, s *session, path string, flags uint16, mc 
 		// maximalAccess: r.MaximalAccess(),
 	}
 
+	// MS-SMB2 §3.2.4.20.10: send FSCTL_VALIDATE_NEGOTIATE_INFO after every
+	// successful TREE_CONNECT on SMB 3.0 and 3.0.2 sessions to
+	// cryptographically confirm that the NEGOTIATE exchange was not tampered
+	// with by a man-in-the-middle.  SMB 3.1.1 uses pre-authentication
+	// integrity instead and is therefore exempt.
+	if s.conn.dialect == smb2.SMB300 || s.conn.dialect == smb2.SMB302 {
+		if err := validateNegotiateInfo(ctx, tc); err != nil {
+			return nil, err
+		}
+	}
+
 	return tc, nil
+}
+
+// validateNegotiateInfo sends FSCTL_VALIDATE_NEGOTIATE_INFO to the server and
+// verifies that the signed response matches the capabilities, security mode,
+// dialect, and server GUID that were negotiated.  Any mismatch aborts the tree
+// connection with an error.
+func validateNegotiateInfo(ctx context.Context, tc *treeConn) error {
+	s := tc.session
+	c := s.conn
+
+	req := &smb2.IoctlRequest{
+		CtlCode:           smb2.FSCTL_VALIDATE_NEGOTIATE_INFO,
+		FileId:            sentinelFileId,
+		Flags:             smb2.SMB2_0_IOCTL_IS_FSCTL,
+		MaxOutputResponse: 24,
+		Input: &smb2.ValidateNegotiateInfoRequest{
+			Capabilities: clientCapabilities,
+			Guid:         c.negotiateClientGuid,
+			SecurityMode: c.negotiateSecurityMode,
+			Dialects:     c.negotiateDialects,
+		},
+	}
+
+	req.CreditCharge = 1
+
+	rr, err := tc.send(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	pkt, err := tc.recv(rr)
+	if err != nil {
+		return err
+	}
+
+	// MS-SMB2 §3.2.5.14.12: if the response is not signed (and not encrypted),
+	// the client MUST close the connection.
+	pktFlags := smb2.PacketCodec(pkt).Flags()
+	isEncrypted := s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0
+	if !isEncrypted && pktFlags&smb2.SMB2_FLAGS_SIGNED == 0 {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO response was not signed"}
+	}
+
+	res, err := accept(smb2.SMB2_IOCTL, pkt)
+	if err != nil {
+		return err
+	}
+
+	r := smb2.IoctlResponseDecoder(res)
+	if r.IsInvalid() {
+		return &InvalidResponseError{"broken FSCTL_VALIDATE_NEGOTIATE_INFO response format"}
+	}
+
+	if r.CtlCode() != smb2.FSCTL_VALIDATE_NEGOTIATE_INFO {
+		return &InvalidResponseError{"unexpected CtlCode in FSCTL_VALIDATE_NEGOTIATE_INFO response"}
+	}
+
+	out := smb2.ValidateNegotiateInfoResponseDecoder(r.Output())
+	if out.IsInvalid() {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO output too short"}
+	}
+
+	// Verify each field against what the server returned in the NEGOTIATE response.
+	if out.Capabilities() != c.serverCapabilities {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO: capabilities mismatch"}
+	}
+	if out.SecurityMode() != c.serverSecurityMode {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO: security mode mismatch"}
+	}
+	if out.Dialect() != c.dialect {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO: dialect mismatch"}
+	}
+	if !bytes.Equal(out.Guid(), c.serverGuid[:]) {
+		return &InvalidResponseError{"FSCTL_VALIDATE_NEGOTIATE_INFO: server GUID mismatch"}
+	}
+
+	return nil
 }
 
 func (tc *treeConn) disconnect(ctx context.Context) error {
