@@ -2312,8 +2312,11 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 		}
 
 		next := info.NextEntryOffset()
-		if next == 0 || uint64(next) >= uint64(len(output)) {
+		if next == 0 {
 			return fi, nil
+		}
+		if uint64(next) >= uint64(len(output)) {
+			return nil, &InvalidResponseError{"bad directory entry offset"}
 		}
 
 		output = output[next:]
