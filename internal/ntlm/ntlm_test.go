@@ -57,7 +57,8 @@ func TestNtlmv2ClientChallenge(t *testing.T) {
 	targetInfo, err := hex.DecodeString(
 		"0200" + "0c00" + "44006f006d00610069006e00" + // MsvAvNbDomainName + dataLen + data
 			"0100" + "0c00" + "530065007200760065007200" + // MsvAvNbComputerName + dataLen + data
-			"0000" + "0000") // MsvAvEOL + dataLen
+			"0000" + "0000",
+	) // MsvAvEOL + dataLen
 	if err != nil {
 		t.Fatal(err)
 	}
