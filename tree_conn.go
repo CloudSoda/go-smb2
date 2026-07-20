@@ -243,7 +243,7 @@ func (tc *treeConn) disconnect(ctx context.Context) error {
 
 	req.CreditCharge = 1
 
-	res, err := tc.sendRecv(ctx, smb2.SMB2_TREE_DISCONNECT, req)
+	res, err := tc.sendRecvUnloaned(ctx, smb2.SMB2_TREE_DISCONNECT, req)
 	if err != nil {
 		return err
 	}
@@ -256,6 +256,16 @@ func (tc *treeConn) disconnect(ctx context.Context) error {
 	return nil
 }
 
+// send transmits a request whose CreditCharge was loaned from the account, so
+// the loan is refunded if the send fails. Credit settlement is owned by the
+// conn layer (sendWith/recv); callers must not refund separately.
+func (tc *treeConn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
+	return tc.sendWith(ctx, req, tc, req.Header().CreditCharge)
+}
+
+// sendRecv sends a loaned request and waits for its response. An error status
+// returned by the server (surfaced by accept) is a settled response, not a
+// refundable failure — the conn layer already charged its credits back.
 func (tc *treeConn) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
 	rr, err := tc.send(ctx, req)
 	if err != nil {
@@ -270,8 +280,30 @@ func (tc *treeConn) sendRecv(ctx context.Context, cmd uint16, req smb2.Packet) (
 	return accept(cmd, pkt)
 }
 
-func (tc *treeConn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
-	return tc.sendWith(ctx, req, tc)
+// sendUnloaned transmits a request that did not draw its CreditCharge from the
+// account, so a failure has nothing to refund. Tree disconnect is the only such
+// request: it runs during teardown, where waiting in loanCredit on credits held
+// by requests that may never return would turn a fast-failing unmount into one
+// that blocks until the context expires. The cost is that the response's grant
+// is banked against a charge the account never paid, inflating the balance by
+// one credit per unmount.
+func (tc *treeConn) sendUnloaned(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
+	return tc.sendWith(ctx, req, tc, 0)
+}
+
+// sendRecvUnloaned is sendRecv for an unloaned request. See sendUnloaned.
+func (tc *treeConn) sendRecvUnloaned(ctx context.Context, cmd uint16, req smb2.Packet) (res []byte, err error) {
+	rr, err := tc.sendUnloaned(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	pkt, err := tc.recv(rr)
+	if err != nil {
+		return nil, err
+	}
+
+	return accept(cmd, pkt)
 }
 
 func (tc *treeConn) recv(rr *requestResponse) (pkt []byte, err error) {

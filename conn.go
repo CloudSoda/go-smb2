@@ -240,12 +240,29 @@ type requestResponse struct {
 	msgId         uint64
 	asyncId       uint64
 	creditRequest uint16
-	pkt           []byte // request packet
-	ctx           context.Context
-	recv          chan []byte
-	err           error
-	rb            *recvBuf   // pooled receive buffer wrapper; return via freeRecvBuf
-	bufPool       *sync.Pool // pool to return rb to
+	// loan holds the credits borrowed from the account for this request and
+	// doubles as the settlement token. A request is settled exactly once,
+	// either by a response charging the server's grant (tryHandle) or by a
+	// failure refunding the loan. Both call claimLoan, which atomically takes
+	// the amount and leaves zero behind, so the loser's refund becomes a no-op.
+	// This makes the amount self-arbitrating: refund sites charge back
+	// claimLoan() unconditionally. (Whether the receiver or a failure path gets
+	// to settle is still decided by who evicts the request from
+	// outstandingRequests; claimLoan only prevents a second settlement.)
+	loan    atomic.Uint32
+	pkt     []byte // request packet
+	ctx     context.Context
+	recv    chan []byte
+	err     error
+	rb      *recvBuf   // pooled receive buffer wrapper; return via freeRecvBuf
+	bufPool *sync.Pool // pool to return rb to
+}
+
+// claimLoan atomically takes the request's outstanding loan, returning the
+// credits to refund — zero if a response, or an earlier settlement, already
+// took it. Safe from any goroutine; only the first caller gets a nonzero value.
+func (rr *requestResponse) claimLoan() uint16 {
+	return uint16(rr.loan.Swap(0))
 }
 
 // freeRecvBuf returns the pooled receive buffer, if any. Safe to call
@@ -358,27 +375,40 @@ func (conn *conn) chargeCredit(creditCharge uint16) {
 	conn.account.charge(creditCharge, creditCharge)
 }
 
+// send transmits a control request that did not loan credits from the account
+// (negotiate, session setup, tree connect, echo, ...). loaned is 0, so a
+// failure refunds nothing.
 func (conn *conn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
-	return conn.sendWith(ctx, req, nil)
+	return conn.sendWith(ctx, req, nil, 0)
 }
 
-func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn) (rr *requestResponse, err error) {
+// sendWith transmits req. loaned is the number of credits the caller loaned
+// from the account for this request (0 for control requests that do not loan).
+// Before the request is registered no one else can settle it, so a failure
+// refunds loaned directly. Once it is outstanding, settlement is claimLoan's
+// job: the receiver takes the loan when a response charges it (tryHandle), and
+// the post-write failure paths evict the request and charge back whatever loan
+// is left — zero if a response already claimed it.
+func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn, loaned uint16) (rr *requestResponse, err error) {
 	conn.m.Lock()
 	defer conn.m.Unlock()
 
 	if conn.err != nil {
+		conn.chargeCredit(loaned)
 		return nil, conn.err
 	}
 
 	select {
 	case <-ctx.Done():
+		conn.chargeCredit(loaned)
 		return nil, ctx.Err()
 	default:
 		// do nothing
 	}
 
-	rr, err = conn.makeRequestResponse(ctx, req, tc)
+	rr, err = conn.makeRequestResponse(ctx, req, tc, loaned)
 	if err != nil {
+		conn.chargeCredit(loaned)
 		return nil, err
 	}
 
@@ -387,17 +417,23 @@ func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn) (
 		select {
 		case err = <-conn.werr:
 			if err != nil {
-				conn.outstandingRequests.pop(rr.msgId)
+				if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+					conn.chargeCredit(rr.claimLoan())
+				}
 
 				return nil, &TransportError{err}
 			}
 		case <-ctx.Done():
-			conn.outstandingRequests.pop(rr.msgId)
+			if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+				conn.chargeCredit(rr.claimLoan())
+			}
 
 			return nil, ctx.Err()
 		}
 	case <-ctx.Done():
-		conn.outstandingRequests.pop(rr.msgId)
+		if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+			conn.chargeCredit(rr.claimLoan())
+		}
 
 		return nil, ctx.Err()
 	}
@@ -422,12 +458,21 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 	conn.m.Lock()
 	defer conn.m.Unlock()
 
+	// Total credits the caller loaned for this batch; refunded if the batch
+	// fails before any response can settle it.
+	var totalLoaned uint16
+	for _, entry := range entries {
+		totalLoaned += entry.req.Header().CreditCharge
+	}
+
 	if conn.err != nil {
+		conn.chargeCredit(totalLoaned)
 		return nil, conn.err
 	}
 
 	select {
 	case <-ctx.Done():
+		conn.chargeCredit(totalLoaned)
 		return nil, ctx.Err()
 	default:
 	}
@@ -532,6 +577,7 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 			var err error
 			wirePkt, err = s.encrypt(compound, s.encryptBuf[:needed])
 			if err != nil {
+				conn.chargeCredit(totalLoaned)
 				return nil, &InternalError{err.Error()}
 			}
 		} else if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
@@ -563,6 +609,7 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 			ctx:           ctx,
 			recv:          make(chan []byte, 1),
 		}
+		rrs[i].loan.Store(uint32(p.CreditCharge()))
 		conn.outstandingRequests.set(rrs[i].msgId, rrs[i])
 
 		if i < n-1 {
@@ -577,28 +624,33 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 		select {
 		case err := <-conn.werr:
 			if err != nil {
-				for _, rr := range rrs {
-					conn.outstandingRequests.pop(rr.msgId)
-				}
+				conn.refundCompound(rrs)
 				return nil, &TransportError{err}
 			}
 		case <-ctx.Done():
-			for _, rr := range rrs {
-				conn.outstandingRequests.pop(rr.msgId)
-			}
+			conn.refundCompound(rrs)
 			return nil, ctx.Err()
 		}
 	case <-ctx.Done():
-		for _, rr := range rrs {
-			conn.outstandingRequests.pop(rr.msgId)
-		}
+		conn.refundCompound(rrs)
 		return nil, ctx.Err()
 	}
 
 	return rrs, nil
 }
 
-func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *treeConn) (rr *requestResponse, err error) {
+// refundCompound pops each request that never left, refunding its loan. Popping
+// is what serializes against the receiver: if a response already settled a
+// request (pop fails), its credits were charged back there instead.
+func (conn *conn) refundCompound(rrs []*requestResponse) {
+	for _, rr := range rrs {
+		if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+			conn.chargeCredit(rr.claimLoan())
+		}
+	}
+}
+
+func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *treeConn, loaned uint16) (rr *requestResponse, err error) {
 	hdr := req.Header()
 
 	var msgId uint64
@@ -663,6 +715,7 @@ func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *
 		ctx:           ctx,
 		recv:          make(chan []byte, 1),
 	}
+	rr.loan.Store(uint32(loaned))
 
 	conn.outstandingRequests.set(msgId, rr)
 
@@ -673,11 +726,22 @@ func (conn *conn) recv(rr *requestResponse) ([]byte, error) {
 	select {
 	case pkt := <-rr.recv:
 		if rr.err != nil {
+			// Transport shutdown: outstandingRequests.shutdown sets rr.err and
+			// closes recv without evicting the request, so no one has settled
+			// the loan. (A response that failed verification settles it in
+			// tryHandle instead, and claiming again here yields zero.)
+			conn.chargeCredit(rr.claimLoan())
 			return nil, rr.err
 		}
 		return pkt, nil
 	case <-rr.ctx.Done():
-		conn.outstandingRequests.pop(rr.msgId)
+		// Refund only if we win the race to remove the request: if the pop
+		// fails, the receiver already took the request and is charging its
+		// response. claimLoan then yields the loan to refund (zero if an
+		// interim response already claimed it).
+		if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+			conn.chargeCredit(rr.claimLoan())
+		}
 
 		return nil, rr.ctx.Err()
 	}
@@ -1024,16 +1088,25 @@ func (conn *conn) tryHandle(pkt []byte, e error, rb *recvBuf) error {
 		return &InvalidResponseError{"unknown message id returned"}
 	case e != nil:
 		rr.err = e
+		// We evicted the request, so we own its settlement. Refunding here
+		// rather than leaving it to conn.recv matters when rr.ctx is already
+		// done: both of that select's arms would be ready, and if it takes the
+		// ctx arm the pop fails and nothing refunds the loan.
+		conn.chargeCredit(rr.claimLoan())
 		conn.freePoolBuf(rb)
 
 		close(rr.recv)
 	case erref.NtStatus(p.Status()) == erref.STATUS_PENDING:
 		rr.asyncId = p.AsyncId()
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
+		// The response settled the loan; take it so the re-registered request
+		// is not refunded again if the caller later abandons it.
+		rr.claimLoan()
 		conn.outstandingRequests.set(msgId, rr)
 		conn.freePoolBuf(rb)
 	default:
 		conn.account.charge(p.CreditResponse(), rr.creditRequest)
+		rr.claimLoan()
 
 		// Transfer ownership of the pooled receive buffer to the
 		// requestResponse so the caller can return it via freeRecvBuf
