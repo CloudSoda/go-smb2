@@ -431,7 +431,15 @@ func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn, l
 			return nil, ctx.Err()
 		}
 	case <-ctx.Done():
+		// Outer arm: the packet never reached the writer. conn.m has been held
+		// since allocation, so no later ID exists and this slot can be reused;
+		// roll the window back alongside the loan refund. Skipped for a
+		// CancelRequest, which never advanced the window. The two inner arms
+		// above must NOT do this: there the packet may already be on the wire.
 		if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+			if _, isCancel := req.(*smb2.CancelRequest); !isCancel {
+				conn.sequenceWindow -= uint64(req.Header().CreditCharge)
+			}
 			conn.chargeCredit(rr.claimLoan())
 		}
 
@@ -577,6 +585,12 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 			var err error
 			wirePkt, err = s.encrypt(compound, s.encryptBuf[:needed])
 			if err != nil {
+				// The frame never reached the writer and conn.m has been held
+				// since the window was advanced in phase 1, so the whole
+				// batch's slots can be reused. Roll the window back by the batch
+				// total alongside the credit refund. (Compounds never carry
+				// CancelRequests, so no per-entry guard is needed.)
+				conn.sequenceWindow -= uint64(totalCreditCharge)
 				conn.chargeCredit(totalLoaned)
 				return nil, &InternalError{err.Error()}
 			}
@@ -632,6 +646,13 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 			return nil, ctx.Err()
 		}
 	case <-ctx.Done():
+		// Outer arm: the frame never reached the writer. conn.m has been held
+		// since phase 1, so the whole batch's slots can be reused; roll the
+		// window back by the batch total alongside refundCompound. The two inner
+		// arms above must NOT do this, and refundCompound is shared with them:
+		// there the frame may already be on the wire, so only the credits (not
+		// the window) may be returned.
+		conn.sequenceWindow -= uint64(totalCreditCharge)
 		conn.refundCompound(rrs)
 		return nil, ctx.Err()
 	}
@@ -698,6 +719,14 @@ func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *
 				clear(s.encryptBuf[:needed])
 				pkt, err = s.encrypt(pkt, s.encryptBuf[:needed])
 				if err != nil {
+					// The packet never reached the writer and conn.m has been
+					// held since allocation, so no later ID exists: give the
+					// window slot back. Guarded like the advance above, since a
+					// CancelRequest never took one. Our caller (sendWith)
+					// refunds the loan, so credits and window are both restored.
+					if _, ok := req.(*smb2.CancelRequest); !ok {
+						conn.sequenceWindow -= uint64(hdr.CreditCharge)
+					}
 					return nil, &InternalError{err.Error()}
 				}
 			} else {
