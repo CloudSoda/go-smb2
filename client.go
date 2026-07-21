@@ -1722,6 +1722,7 @@ func (f *File) stat() (os.FileInfo, error) {
 		EndOfFile:      std.EndOfFile(),
 		AllocationSize: std.AllocationSize(),
 		FileAttributes: basic.FileAttributes(),
+		FileId:         uint64(info.InternalInformation().IndexNumber()),
 		FileName:       base(f.name),
 	}, nil
 }
@@ -2252,7 +2253,7 @@ func (f *File) ioctl(req *smb2.IoctlRequest) (output []byte, err error) {
 
 func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 	req := &smb2.QueryDirectoryRequest{
-		FileInfoClass:      smb2.FileDirectoryInformation,
+		FileInfoClass:      smb2.FileIdBothDirectoryInformation,
 		Flags:              0,
 		FileIndex:          0,
 		OutputBufferLength: uint32(f.maxTransactSize()),
@@ -2291,7 +2292,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 	output := r.OutputBuffer()
 
 	for {
-		info := smb2.FileDirectoryInformationDecoder(output)
+		info := smb2.FileIdBothDirectoryInformationDecoder(output)
 		if info.IsInvalid() {
 			return nil, &InvalidResponseError{"broken query directory response format"}
 		}
@@ -2307,6 +2308,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 				EndOfFile:      info.EndOfFile(),
 				AllocationSize: info.AllocationSize(),
 				FileAttributes: info.FileAttributes(),
+				FileId:         info.FileId(),
 				FileName:       name,
 			})
 		}
@@ -2466,7 +2468,17 @@ type FileStat struct {
 	EndOfFile      int64
 	AllocationSize int64
 	FileAttributes uint32
-	FileName       string
+	// FileId is the server's 64-bit file reference number (the MFT record plus
+	// sequence number on NTFS, the inode number on Samba). It is populated by
+	// File.Readdir, File.ReaddirPlus and File.Stat.
+	//
+	// It is 0 from Share.Stat and Share.Lstat, which report the stat carried by
+	// the CREATE response rather than issuing a separate query, and that
+	// response has no file id; obtain one via File.Stat on an open handle. It
+	// is also 0 when the server itself supplies none, as some legacy and
+	// non-native backends do.
+	FileId   uint64
+	FileName string
 }
 
 func (fs *FileStat) Name() string {
