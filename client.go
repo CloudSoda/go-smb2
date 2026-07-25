@@ -1151,12 +1151,7 @@ func (fs *Share) createFile(name string, req *smb2.CreateRequest, followSymlinks
 		return fs.createFileRec(name, req)
 	}
 
-	req.CreditCharge, _, err = fs.loanCredit(0)
-	defer func() {
-		if err != nil {
-			fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = fs.borrowCredits(0)
 	if err != nil {
 		return nil, err
 	}
@@ -1180,12 +1175,7 @@ func (fs *Share) createFile(name string, req *smb2.CreateRequest, followSymlinks
 
 func (fs *Share) createFileRec(name string, req *smb2.CreateRequest) (f *File, err error) {
 	for range clientMaxSymlinkDepth {
-		req.CreditCharge, _, err = fs.loanCredit(0)
-		defer func() {
-			if err != nil {
-				fs.chargeCredit(req.CreditCharge)
-			}
-		}()
+		req.CreditCharge, _, err = fs.borrowCredits(0)
 		if err != nil {
 			return nil, err
 		}
@@ -1247,21 +1237,11 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 }
 
 func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
-	rr, err := fs.send(fs.ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	pkt, err := fs.recv(rr)
-	if err != nil {
-		return nil, err
-	}
-
-	return accept(cmd, pkt)
+	return fs.treeConn.sendRecv(fs.ctx, cmd, req)
 }
 
-func (fs *Share) loanCredit(payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
-	return fs.session.conn.loanCredit(fs.ctx, payloadSize)
+func (fs *Share) borrowCredits(payloadSize int) (creditCharge uint16, grantedPayloadSize int, err error) {
+	return fs.session.conn.borrowCredits(fs.ctx, payloadSize)
 }
 
 type File struct {
@@ -1299,7 +1279,11 @@ func (f *File) close() error {
 		Flags: 0,
 	}
 
-	req.CreditCharge = 1
+	var err error
+	req.CreditCharge, _, err = f.fs.borrowCredits(0)
+	if err != nil {
+		return err
+	}
 
 	req.FileId = f.fd
 
@@ -1462,12 +1446,7 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 }
 
 func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, rr *requestResponse, err error) {
-	creditCharge, m, err := f.fs.loanCredit(n)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(creditCharge)
-		}
-	}()
+	creditCharge, m, err := f.fs.borrowCredits(n)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -1809,12 +1788,7 @@ func (f *File) Sync() (err error) {
 	req := new(smb2.FlushRequest)
 	req.FileId = f.fd
 
-	req.CreditCharge, _, err = f.fs.loanCredit(0)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(0)
 	if err != nil {
 		return &os.PathError{Op: "sync", Path: f.name, Err: err}
 	}
@@ -1981,12 +1955,7 @@ func (f *File) writeAt(b []byte, off int64) (n int, err error) {
 
 // writeAt allows partial write
 func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
-	creditCharge, m, err := f.fs.loanCredit(len(b))
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(creditCharge)
-		}
-	}()
+	creditCharge, m, err := f.fs.borrowCredits(len(b))
 	if err != nil {
 		return 0, err
 	}
@@ -2222,12 +2191,7 @@ func (f *File) ioctl(req *smb2.IoctlRequest) (output []byte, err error) {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.loanCredit(payloadSize)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return nil, err
 	}
@@ -2267,12 +2231,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.loanCredit(payloadSize)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return nil, err
 	}
@@ -2332,12 +2291,7 @@ func (f *File) queryInfo(req *smb2.QueryInfoRequest) (infoBytes []byte, err erro
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.loanCredit(payloadSize)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return nil, err
 	}
@@ -2404,14 +2358,9 @@ func (f *File) SetSecurityInfoRaw(flags SecurityInformationRequestFlags, sd smb2
 	}
 
 	var err error
-	req.CreditCharge, _, err = f.fs.loanCredit(req.Size())
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(req.Size())
 	if err != nil {
-		return fmt.Errorf("calling loanCredit: %w", err)
+		return fmt.Errorf("calling borrowCredits: %w", err)
 	}
 
 	_, err = f.sendRecv(smb2.SMB2_SET_INFO, req)
@@ -2429,12 +2378,7 @@ func (f *File) setInfo(req *smb2.SetInfoRequest) (err error) {
 		return &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.loanCredit(payloadSize)
-	defer func() {
-		if err != nil {
-			f.fs.chargeCredit(req.CreditCharge)
-		}
-	}()
+	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return err
 	}
