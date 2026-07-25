@@ -1,19 +1,16 @@
 package smb2
 
-// Regression test for double-settlement of credits on error-status responses.
+// Credit-accounting tests driven against a fake server that keeps its own books.
 //
-// The defect: tryHandle banks the server's CreditResponse for every non-pending
-// response, and the old per-operation `defer { if err != nil { chargeCredit } }`
-// in client.go then refunded the loan a second time because accept() turned the
-// error status into a Go error. The client's balance drifted +CreditCharge
-// ahead of the server's command sequence window per failed operation; concurrent
-// callers draining the inflated balance overran the window, and a real server
-// answers STATUS_INVALID_PARAMETER or drops the connection (MS-SMB2 3.3.5.2.3).
+// The invariant under test is that the client's spendable balance never exceeds
+// what the server has granted. A client holding credits the server never issued
+// will address message IDs past the server's command sequence window, which a
+// real server answers with STATUS_INVALID_PARAMETER or a disconnect
+// (MS-SMB2 3.3.5.2.3).
 //
-// The fix makes credit settlement single-owner: a response settles the loan
-// (tryHandle marks it accounted), and the loan is refunded only when no response
-// ever settled it. Both subtests must show zero fabricated credits and zero
-// window violations regardless of whether operations fail.
+// Settlement has exactly one owner per request: a response settles the loan when
+// tryHandle banks the server's grant, and otherwise the loan is refunded. The two
+// tests here pin one half of that rule each.
 
 import (
 	"context"
@@ -193,7 +190,7 @@ func runCreditBooks(t *testing.T, injectErrors bool) {
 	}
 
 	// Phase B2: CLOSE consumes a window slot like any other file operation, so
-	// it must loan too. (The fake server answers everything with a READ-shaped
+	// it must borrow too. (The fake server answers everything with a READ-shaped
 	// response, so close reports a decode error; what is under test here is the
 	// books, not the reply.)
 	for range 5 {
@@ -235,17 +232,17 @@ func runCreditBooks(t *testing.T, injectErrors bool) {
 
 // TestTryHandleRefundsLoanOnFailedVerification covers the other half of the
 // single-owner rule: a response that fails verification (bad signature, decode
-// error) evicts the request but is not a settlement, so tryHandle must refund
+// error) pops the request but is not a settlement, so tryHandle must refund
 // the loan itself.
 //
-// Leaving that refund to conn.recv leaks credits when the caller's context is
-// already done: recv's select then has both arms ready, and on the ctx arm the
-// pop fails — tryHandle already took the request — so nothing charges the loan
-// back. The leak is permanent, so a connection that keeps hitting it eventually
-// starves and every operation blocks in account.loan.
+// Leaving that refund to conn.recv would leak the loan whenever the caller's
+// context is already done, because recv can then return by the context path,
+// where the request has already been popped and nothing refunds. The leak is
+// permanent, so a connection that keeps hitting it eventually starves and every
+// operation blocks in account.borrow.
 //
-// Each round below uses a cancelled context, making that select a coin flip;
-// repeating makes taking the leaky arm at least once a near-certainty.
+// Each round below uses a cancelled context, so which path recv returns by is
+// unpredictable; 50 rounds make hitting the leaky one a near-certainty.
 func TestTryHandleRefundsLoanOnFailedVerification(t *testing.T) {
 	require := require.New(t)
 
@@ -255,7 +252,7 @@ func TestTryHandleRefundsLoanOnFailedVerification(t *testing.T) {
 	}
 
 	// Open the account up to 9 credits. Each round borrows and must return 2.
-	c.account.charge(8, 8)
+	c.account.settle(8, 8)
 	const want = 9
 	require.Equal(want, len(c.account.balance))
 
@@ -265,13 +262,13 @@ func TestTryHandleRefundsLoanOnFailedVerification(t *testing.T) {
 	verifyErr := &InvalidResponseError{"packet failed signature verification"}
 
 	for round := range 50 {
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 
 		msgId := uint64(round)
 		rr := &requestResponse{msgId: msgId, ctx: ctx, recv: make(chan []byte, 1)}
-		rr.loan.Store(uint32(loaned))
+		rr.loan.Store(uint32(borrowed))
 		c.outstandingRequests.set(msgId, rr)
 
 		// A response arrives for this request but fails verification.
@@ -282,8 +279,8 @@ func TestTryHandleRefundsLoanOnFailedVerification(t *testing.T) {
 		require.Equal(want, len(c.account.balance),
 			"round %d: loan must be refunded when the response is not a settlement", round)
 
-		// The caller then observes the failure down whichever arm of recv's
-		// select wins. The loan is already claimed, so neither refunds twice.
+		// The caller then observes the failure, by whichever path recv returns.
+		// The loan is already claimed, so neither path refunds twice.
 		_, err = c.recv(rr)
 		require.Error(err)
 		require.Equal(want, len(c.account.balance),

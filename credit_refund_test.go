@@ -1,24 +1,21 @@
 package smb2
 
-// White-box tests for the credit refund/settlement paths in conn.go.
+// White-box tests for the credit refund and settlement paths in conn.go.
 //
 // Two invariants are under test:
 //
-//  1. The window/credit invariant (SEQUENCE-ROLLBACK.md): after any send that
-//     fails before the packet reaches the writer, conn.sequenceWindow (the next
-//     message ID the client will allocate) plus len(conn.account.balance) (the
-//     spendable credit count) must equal the server's window ceiling. A send that
-//     allocates a message ID but never transmits it must roll the window back, or
-//     the client's ID counter drifts ahead of what its balance can address.
+//  1. Window/credit: conn.sequenceWindow (the next message ID the client will
+//     allocate) plus len(conn.account.balance) (the spendable credit count) must
+//     equal the server's window ceiling. A send that allocates a message ID but
+//     never transmits it must roll the window back, or the ID counter drifts
+//     ahead of what the balance can address.
 //
-//  2. Single-owner settlement (commit 62dc3c9): each requestResponse carries its
-//     loan in an atomic; claimLoan swap-takes it exactly once, so whichever of the
-//     receiver or a failure path evicts the request settles the loan, and the
-//     loser's refund becomes a no-op charge of zero.
+//  2. Single-owner settlement: each requestResponse carries its loan in an
+//     atomic; claimLoan swap-takes it exactly once, so whichever of the receiver
+//     or a failure path pops the request settles the loan, and any later claim
+//     yields zero.
 //
-// TestSendWith... and TestSendCompound... are regression tests for invariant 1:
-// before the rollback fix, their sequenceWindow assertions failed (the window
-// stayed advanced at 3 and 7) while the refund assertions passed.
+// TestSendWith... and TestSendCompound... pin invariant 1;
 // TestPendingResponseSettlesLoanOnce and TestRecvRefundsLoan pin invariant 2.
 
 import (
@@ -55,12 +52,12 @@ func newRollbackConn() *conn {
 		maxTransactSize:     bufSize,
 	}
 	c.sequenceWindow = 1
-	c.account.charge(8, 8) // 1 initial + 8 == startBalance spendable credits
+	c.account.settle(8, 8) // 1 initial + 8 == startBalance spendable credits
 	return c
 }
 
 // newReadReq mirrors what client.go's readAtChunk builds, with CreditCharge set
-// explicitly to the amount loaned for this request. A zero-value FileId encodes
+// explicitly to the amount borrowed for this request. A zero-value FileId encodes
 // fine because nothing decodes it in these tests.
 func newReadReq(creditCharge uint16) *smb2.ReadRequest {
 	req := &smb2.ReadRequest{
@@ -88,13 +85,13 @@ func TestSendWithRollsBackWindowOnAbandonedSend(t *testing.T) {
 
 		c := newRollbackConn()
 
-		// Loan 2 credits: balance drops to startBalance-2.
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		// Borrow 2 credits: balance drops to startBalance-2.
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 		require.Equal(startBalance-2, len(c.account.balance))
 
-		req := newReadReq(loaned)
+		req := newReadReq(borrowed)
 
 		// Fill the single-slot write channel so the handoff in sendWith can never
 		// proceed and the outer ctx.Done() arm is the only exit.
@@ -110,7 +107,7 @@ func TestSendWithRollsBackWindowOnAbandonedSend(t *testing.T) {
 			cancel()
 		}()
 
-		rr, err := c.sendWith(ctx, req, nil, loaned)
+		rr, err := c.sendWith(ctx, req, nil, borrowed)
 
 		// 1. The abandoned send fails with the context error and yields no rr.
 		require.ErrorIs(err, context.Canceled)
@@ -121,8 +118,7 @@ func TestSendWithRollsBackWindowOnAbandonedSend(t *testing.T) {
 			"loan must be refunded on the abandoned-send arm")
 
 		// 3. The window rolls back to 1: the allocated message ID is given back
-		//    because it was never transmitted. Before the rollback fix this
-		//    failed with sequenceWindow stuck at 3.
+		//    because it was never transmitted.
 		require.EqualValues(1, c.sequenceWindow,
 			"window must roll back when the packet is never transmitted")
 	})
@@ -137,13 +133,13 @@ func TestSendWithRollsBackWindowOnAbandonedSend(t *testing.T) {
 		errBoom := errors.New("connection already failed")
 		c.err = errBoom
 
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 
-		req := newReadReq(loaned)
+		req := newReadReq(borrowed)
 
-		rr, err := c.sendWith(context.Background(), req, nil, loaned)
+		rr, err := c.sendWith(context.Background(), req, nil, borrowed)
 
 		require.ErrorIs(err, errBoom)
 		require.Nil(rr)
@@ -157,18 +153,18 @@ func TestSendWithRollsBackWindowOnAbandonedSend(t *testing.T) {
 
 		c := newRollbackConn()
 
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 
-		req := newReadReq(loaned)
+		req := newReadReq(borrowed)
 
 		// An already-cancelled context is caught by the early select at the top
 		// of sendWith, refunding before any message ID is allocated.
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		rr, err := c.sendWith(ctx, req, nil, loaned)
+		rr, err := c.sendWith(ctx, req, nil, borrowed)
 
 		require.ErrorIs(err, context.Canceled)
 		require.Nil(rr)
@@ -193,10 +189,10 @@ func TestSendCompoundRollsBackWindowOnAbandonedSend(t *testing.T) {
 
 		c := newRollbackConn()
 
-		// Loan the batch total up front: balance drops to startBalance-batchTotal.
-		loaned, _, err := c.account.loan(context.Background(), batchTotal)
+		// Borrow the batch total up front: balance drops to startBalance-batchTotal.
+		borrowed, _, err := c.account.borrow(context.Background(), batchTotal)
 		require.NoError(err)
-		require.EqualValues(batchTotal, loaned)
+		require.EqualValues(batchTotal, borrowed)
 		require.Equal(startBalance-batchTotal, len(c.account.balance))
 
 		entries := []compoundEntry{
@@ -223,12 +219,11 @@ func TestSendCompoundRollsBackWindowOnAbandonedSend(t *testing.T) {
 		require.Equal(startBalance, len(c.account.balance),
 			"batch credits must be refunded on the abandoned-send arm")
 
-		// The window rolls back by the batch total to 1. Before the rollback fix
-		// this failed with sequenceWindow stuck at 7.
+		// The window rolls back by the batch total to 1.
 		require.EqualValues(1, c.sequenceWindow,
 			"window must roll back by the batch total when the frame is never transmitted")
 
-		// The batch's requests were evicted by refundCompound. Message IDs are
+		// The batch's requests were popped by refundCompound. Message IDs are
 		// allocated from sequenceWindow==1 in charge order: 1, 1+1==2, 2+2==4.
 		for _, msgId := range []uint64{1, 2, 4} {
 			_, ok := c.outstandingRequests.pop(msgId)
@@ -241,9 +236,9 @@ func TestSendCompoundRollsBackWindowOnAbandonedSend(t *testing.T) {
 
 		c := newRollbackConn()
 
-		loaned, _, err := c.account.loan(context.Background(), batchTotal)
+		borrowed, _, err := c.account.borrow(context.Background(), batchTotal)
 		require.NoError(err)
-		require.EqualValues(batchTotal, loaned)
+		require.EqualValues(batchTotal, borrowed)
 
 		entries := []compoundEntry{
 			{req: newReadReq(1)},
@@ -277,17 +272,17 @@ func TestPendingResponseSettlesLoanOnce(t *testing.T) {
 		outstandingRequests: newOutstandingRequests(),
 		account:             openAccount(128),
 	}
-	c.account.charge(8, 8)
+	c.account.settle(8, 8)
 	require.Equal(startBalance, len(c.account.balance))
 
-	// The caller's context is already done, so when it later calls recv both of
-	// recv's select arms would be ready.
+	// The caller's context is already done, so the later recv call could return
+	// by either path.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	loaned, _, err := c.account.loan(context.Background(), 2)
+	borrowed, _, err := c.account.borrow(context.Background(), 2)
 	require.NoError(err)
-	require.EqualValues(2, loaned)
+	require.EqualValues(2, borrowed)
 	require.Equal(startBalance-2, len(c.account.balance))
 
 	const msgId = 5
@@ -297,7 +292,7 @@ func TestPendingResponseSettlesLoanOnce(t *testing.T) {
 		recv:          make(chan []byte, 1),
 		creditRequest: 2,
 	}
-	rr.loan.Store(uint32(loaned))
+	rr.loan.Store(uint32(borrowed))
 	c.outstandingRequests.set(msgId, rr)
 
 	// An interim STATUS_PENDING response granting 2 credits. A plain 64-byte
@@ -335,19 +330,19 @@ func TestPendingResponseSettlesLoanOnce(t *testing.T) {
 // claimed, so the refund itself is never exercised there. Both subtests pin
 // invariant 2.
 func TestRecvRefundsLoan(t *testing.T) {
-	t.Run("ctx-eviction", func(t *testing.T) {
+	t.Run("ctx-pop", func(t *testing.T) {
 		require := require.New(t)
 
 		c := &conn{
 			outstandingRequests: newOutstandingRequests(),
 			account:             openAccount(128),
 		}
-		c.account.charge(8, 8)
+		c.account.settle(8, 8)
 		require.Equal(startBalance, len(c.account.balance))
 
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -358,7 +353,7 @@ func TestRecvRefundsLoan(t *testing.T) {
 			ctx:   ctx,
 			recv:  make(chan []byte, 1),
 		}
-		rr.loan.Store(uint32(loaned))
+		rr.loan.Store(uint32(borrowed))
 		c.outstandingRequests.set(msgId, rr)
 
 		// recv's recv channel is empty, so the cancelled-context arm wins: it pops
@@ -369,7 +364,7 @@ func TestRecvRefundsLoan(t *testing.T) {
 			"the ctx arm must refund an unclaimed loan")
 
 		_, ok := c.outstandingRequests.pop(msgId)
-		require.False(ok, "recv must have evicted the request")
+		require.False(ok, "recv must have popped the request")
 	})
 
 	t.Run("shutdown", func(t *testing.T) {
@@ -379,12 +374,12 @@ func TestRecvRefundsLoan(t *testing.T) {
 			outstandingRequests: newOutstandingRequests(),
 			account:             openAccount(128),
 		}
-		c.account.charge(8, 8)
+		c.account.settle(8, 8)
 		require.Equal(startBalance, len(c.account.balance))
 
-		loaned, _, err := c.account.loan(context.Background(), 2)
+		borrowed, _, err := c.account.borrow(context.Background(), 2)
 		require.NoError(err)
-		require.EqualValues(2, loaned)
+		require.EqualValues(2, borrowed)
 
 		// A live (non-cancelled) context, so the pkt arm — not the ctx arm — is the
 		// one that fires.
@@ -394,10 +389,10 @@ func TestRecvRefundsLoan(t *testing.T) {
 			ctx:   context.Background(),
 			recv:  make(chan []byte, 1),
 		}
-		rr.loan.Store(uint32(loaned))
+		rr.loan.Store(uint32(borrowed))
 		c.outstandingRequests.set(msgId, rr)
 
-		// Transport shutdown sets rr.err and closes rr.recv WITHOUT evicting the
+		// Transport shutdown sets rr.err and closes rr.recv WITHOUT popping the
 		// request, so no one has settled the loan yet.
 		errShutdown := errors.New("transport shut down")
 		c.outstandingRequests.shutdown(errShutdown)
