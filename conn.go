@@ -368,6 +368,39 @@ func (conn *conn) refundCredits(creditCharge uint16) {
 	conn.account.settle(creditCharge, creditCharge)
 }
 
+/*
+mustSign returns true if req needs to be signed.
+
+MS-SMB2 3.2.4.1.1 describes when a message needs to be signed.
+https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/973630a8-8aa1-4398-89a8-13cf830f194d
+
+SESSION_SETUP doesn't rely on this method and always signs.
+*/
+func (conn *conn) mustSign(req smb2.Packet) bool {
+	// true if the library user requested it at initialization or if the server
+	// requires it
+	if conn.requireSigning {
+		return true
+	}
+
+	// // Only SMB 3.1.1 requires TREE_CONNECT to always be signed, but for
+	// // simplicity's sake, we'll sign it no matter the dialect version.
+	_, isTreeConnect := req.(*smb2.TreeConnectRequest)
+	return isTreeConnect
+}
+
+// mustSignAny reports whether any individual entry in the compound request
+// needs to be signed. If one needs to be signed, then they should all be
+// signed.
+func (conn *conn) mustSignAny(entries []compoundEntry) bool {
+	for _, entry := range entries {
+		if conn.mustSign(entry.req) {
+			return true
+		}
+	}
+	return false
+}
+
 // send transmits a control request that did not borrow credits from the account
 // (negotiate, session setup, tree connect, echo, ...). borrowed is 0, so a
 // failure refunds nothing.
@@ -585,7 +618,7 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 				conn.refundCredits(totalBorrowed)
 				return nil, &InternalError{err.Error()}
 			}
-		} else if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
+		} else if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 && conn.mustSignAny(entries) {
 			// Sign each packet individually in-place.
 			// Per MS-SMB2 3.3.5.2.4, the server uses the NextCommand value as the
 			// message length for signature verification (8-byte aligned size), so
@@ -721,7 +754,7 @@ func (conn *conn) makeRequestResponse(ctx context.Context, req smb2.Packet, tc *
 					return nil, &InternalError{err.Error()}
 				}
 			} else {
-				if s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
+				if conn.mustSign(req) && s.sessionFlags&(smb2.SMB2_SESSION_FLAG_IS_GUEST|smb2.SMB2_SESSION_FLAG_IS_NULL) == 0 {
 					pkt = s.sign(pkt)
 				}
 			}
