@@ -383,8 +383,8 @@ func (conn *conn) mustSign(req smb2.Packet) bool {
 		return true
 	}
 
-	// // Only SMB 3.1.1 requires TREE_CONNECT to always be signed, but for
-	// // simplicity's sake, we'll sign it no matter the dialect version.
+	// Only SMB 3.1.1 requires TREE_CONNECT to always be signed, but for
+	// simplicity's sake, we'll sign it no matter the dialect version.
 	_, isTreeConnect := req.(*smb2.TreeConnectRequest)
 	return isTreeConnect
 }
