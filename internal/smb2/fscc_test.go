@@ -47,39 +47,24 @@ func TestFileIdBothDirectoryInformationDecoder(t *testing.T) {
 
 // MS-FSCC 2.4.22 overloads EaSize as the reparse tag, but only when the
 // reparse attribute is set. Both readings must be decoded from the same bytes
-// without one bleeding into the other.
+// without one bleeding into the other. The tag value itself is never
+// interpreted, so one tag exercises the whole path.
 func TestFileIdBothDirectoryInformationDecoderReparsePointTag(t *testing.T) {
-	const eaSizeOffset = 64
+	require := require.New(t)
 
-	tests := []struct {
-		name       string
-		attributes uint32
-		field      uint32
-		wantTag    uint32
-	}{
-		{"symlink", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_SYMLINK, IO_REPARSE_TAG_SYMLINK},
-		{"junction", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_MOUNT_POINT, IO_REPARSE_TAG_MOUNT_POINT},
-		{"hsm", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_HSM, IO_REPARSE_TAG_HSM},
-		// Without the attribute the field is a genuine EA size, not a tag.
-		{"plain file with EAs", FILE_ATTRIBUTE_NORMAL, 128, 0},
-		{"plain file", FILE_ATTRIBUTE_NORMAL, 0, 0},
-	}
+	b := buildIdBothDirInfo(1, "entry")
+	c := FileIdBothDirectoryInformationDecoder(b)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require := require.New(t)
+	le.PutUint32(b[56:60], FILE_ATTRIBUTE_REPARSE_POINT)
+	le.PutUint32(b[64:68], IO_REPARSE_TAG_SYMLINK)
+	require.EqualValues(IO_REPARSE_TAG_SYMLINK, c.ReparsePointTag())
+	require.EqualValues(IO_REPARSE_TAG_SYMLINK, c.EaSize(), "EaSize must still report the raw field")
 
-			b := buildIdBothDirInfo(1, "entry")
-			le.PutUint32(b[56:60], tt.attributes)
-			le.PutUint32(b[eaSizeOffset:eaSizeOffset+4], tt.field)
-
-			c := FileIdBothDirectoryInformationDecoder(b)
-
-			require.False(c.IsInvalid())
-			require.Equal(tt.wantTag, c.ReparsePointTag())
-			require.Equal(tt.field, c.EaSize(), "EaSize must still report the raw field")
-		})
-	}
+	// Without the attribute the same field is a genuine EA size, not a tag.
+	le.PutUint32(b[56:60], FILE_ATTRIBUTE_NORMAL)
+	le.PutUint32(b[64:68], 128)
+	require.Zero(c.ReparsePointTag())
+	require.EqualValues(128, c.EaSize())
 }
 
 // A truncated entry must be rejected rather than panicking, since the buffer

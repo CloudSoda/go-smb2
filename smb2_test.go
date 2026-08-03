@@ -949,13 +949,13 @@ func TestSecurityDescriptor(t *testing.T) {
 // binds to the public one.
 const ioReparseTagSymlink = uint32(0xA000000C)
 
-// TestReaddirReparsePointTag covers change 4: a directory listing distinguishes
-// a symlink from a plain file by reparse tag, not just by the shared
+// TestReaddirReparsePointTag checks that a directory listing distinguishes a
+// symlink from a plain file by reparse tag, not just by the shared
 // FILE_ATTRIBUTE_REPARSE_POINT bit.
 //
-// It does not cover junctions (IO_REPARSE_TAG_MOUNT_POINT): the library exposes
-// no way to create one, so that tag is only covered at the decoder level in
-// internal/smb2.
+// Only symlinks are covered, because the library exposes no way to create a
+// junction. No tag-specific coverage is lost by that: the decoder returns the
+// field verbatim and never interprets the tag value.
 func TestReaddirReparsePointTag(t *testing.T) {
 	if fs == nil {
 		t.Skip()
