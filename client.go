@@ -2440,8 +2440,6 @@ type FileStat struct {
 
 	// ReparsePointTag is the tag that identifies the file system filter
 	// associated with the data when the file is a reparse point. Otherwise, 0.
-	//
-	// It is populated by File.Readdir and File.ReaddirPlus.
 	ReparsePointTag uint32
 
 	FileName string
