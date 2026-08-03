@@ -2337,6 +2337,7 @@ func (f *File) SecurityInfo(flags SecurityInformationRequestFlags) (*sddl.Securi
 	return sd, nil
 }
 
+// SecurityInfoRaw returns the raw security descriptor of the file as a byte array
 func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, error) {
 	op := "secinfo"
 	req := &smb2.QueryInfoRequest{
@@ -2351,7 +2352,9 @@ func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, er
 		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
 	}
 
-	return infoBytes, nil
+	// Clone: infoBytes is a subslice of a pooled receive buffer, so after that
+	// buffer is recycled a data hazard is introduced.
+	return bytes.Clone(infoBytes), nil
 }
 
 func (f *File) SetSecurityInfo(flags SecurityInformationRequestFlags, sd *sddl.SecurityDescriptor) error {
