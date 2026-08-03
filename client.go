@@ -2432,12 +2432,8 @@ type FileStat struct {
 	// non-native backends do.
 	FileId uint64
 
-	// ReparsePointTag is the reparse tag (IO_REPARSE_TAG_*) when FileAttributes
-	// has FILE_ATTRIBUTE_REPARSE_POINT, 0 otherwise. It distinguishes a symlink
-	// (IO_REPARSE_TAG_SYMLINK) or junction (IO_REPARSE_TAG_MOUNT_POINT) from a
-	// dedup, HSM or cloud-placeholder file, all of which carry the same
-	// attribute bit. On the wire it is the EaSize field of
-	// FILE_ID_BOTH_DIR_INFORMATION, which the two readings share.
+	// ReparsePointTag is the tag that identifies the file system filter
+	// associated with the data when the file is a reparse point. Otherwise, 0.
 	//
 	// It is populated by File.Readdir and File.ReaddirPlus.
 	ReparsePointTag uint32
