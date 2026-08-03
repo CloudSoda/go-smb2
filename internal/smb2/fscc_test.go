@@ -45,6 +45,43 @@ func TestFileIdBothDirectoryInformationDecoder(t *testing.T) {
 	require.EqualValues(0x20, c.FileAttributes())
 }
 
+// MS-FSCC 2.4.17 overloads EaSize as the reparse tag, but only when the
+// reparse attribute is set. Both readings must be decoded from the same bytes
+// without one bleeding into the other.
+func TestFileIdBothDirectoryInformationDecoderReparsePointTag(t *testing.T) {
+	const eaSizeOffset = 64
+
+	tests := []struct {
+		name       string
+		attributes uint32
+		field      uint32
+		wantTag    uint32
+	}{
+		{"symlink", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_SYMLINK, IO_REPARSE_TAG_SYMLINK},
+		{"junction", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_MOUNT_POINT, IO_REPARSE_TAG_MOUNT_POINT},
+		{"hsm", FILE_ATTRIBUTE_REPARSE_POINT, IO_REPARSE_TAG_HSM, IO_REPARSE_TAG_HSM},
+		// Without the attribute the field is a genuine EA size, not a tag.
+		{"plain file with EAs", FILE_ATTRIBUTE_NORMAL, 128, 0},
+		{"plain file", FILE_ATTRIBUTE_NORMAL, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require := require.New(t)
+
+			b := buildIdBothDirInfo(1, "entry")
+			le.PutUint32(b[56:60], tt.attributes)
+			le.PutUint32(b[eaSizeOffset:eaSizeOffset+4], tt.field)
+
+			c := FileIdBothDirectoryInformationDecoder(b)
+
+			require.False(c.IsInvalid())
+			require.Equal(tt.wantTag, c.ReparsePointTag())
+			require.Equal(tt.field, c.EaSize(), "EaSize must still report the raw field")
+		})
+	}
+}
+
 // A truncated entry must be rejected rather than panicking, since the buffer
 // comes straight off the wire.
 func TestFileIdBothDirectoryInformationDecoderIsInvalid(t *testing.T) {

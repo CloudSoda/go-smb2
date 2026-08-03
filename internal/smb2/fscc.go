@@ -408,6 +408,20 @@ func (c FileIdBothDirectoryInformationDecoder) EaSize() uint32 {
 	return le.Uint32(c[64:68])
 }
 
+// ReparsePointTag is the reparse tag (IO_REPARSE_TAG_*) of the entry, or 0 when
+// it is not a reparse point.
+//
+// MS-FSCC 2.4.17 overloads the EaSize field: when FILE_ATTRIBUTE_REPARSE_POINT
+// is set in FileAttributes, the field holds the reparse tag instead of the
+// extended-attribute size. This is the same union FindFirstFile exposes as
+// WIN32_FIND_DATA.dwReserved0.
+func (c FileIdBothDirectoryInformationDecoder) ReparsePointTag() uint32 {
+	if c.FileAttributes()&FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+		return 0
+	}
+	return c.EaSize()
+}
+
 func (c FileIdBothDirectoryInformationDecoder) ShortNameLength() uint8 {
 	return c[68]
 }
