@@ -279,8 +279,8 @@ func (s *session) logoff(ctx context.Context) error {
 	// Release the transport and the receiver goroutine however the round trip
 	// turns out.
 	defer func() {
-		// rdone tells the receiver its impending read error is expected.
-		// non-blocking send
+		// rdone tells the receiver its impending read error is expected. The
+		// send is non-blocking to defend against multiple calls to logoff().
 		select {
 		case s.conn.rdone <- struct{}{}:
 		default:
