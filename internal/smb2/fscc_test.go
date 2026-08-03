@@ -8,7 +8,7 @@ import (
 )
 
 // buildIdBothDirInfo encodes a FILE_ID_BOTH_DIR_INFORMATION entry (MS-FSCC
-// 2.4.17) with the given file id and name, so the decoder's offsets can be
+// 2.4.22) with the given file id and name, so the decoder's offsets can be
 // checked against an independently laid-out buffer.
 func buildIdBothDirInfo(fileID uint64, name string) []byte {
 	nameBytes := utf16le.Encode(name, utf16le.MapCharsNone)
@@ -45,7 +45,7 @@ func TestFileIdBothDirectoryInformationDecoder(t *testing.T) {
 	require.EqualValues(0x20, c.FileAttributes())
 }
 
-// MS-FSCC 2.4.17 overloads EaSize as the reparse tag, but only when the
+// MS-FSCC 2.4.22 overloads EaSize as the reparse tag, but only when the
 // reparse attribute is set. Both readings must be decoded from the same bytes
 // without one bleeding into the other.
 func TestFileIdBothDirectoryInformationDecoderReparsePointTag(t *testing.T) {
