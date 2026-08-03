@@ -1,8 +1,8 @@
 package smb2
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1544,6 +1544,11 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 //
 // Security queries use SMB2 compound requests (CREATE+QUERY_INFO+CLOSE batched
 // into single round-trips), sub-batching internally to respect credit limits.
+//
+// The returned error reflects the state of the directory listing only: nil,
+// io.EOF after the last entry, or a real Readdir failure. Security failures,
+// whether batch-wide or per-file, are reported on DirEntryPlus.Err. A caller
+// can degrade per-entry instead of abandoning the whole listing.
 func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) ([]DirEntryPlus, error) {
 	fi, err := f.Readdir(n)
 	if len(fi) == 0 {
@@ -1567,36 +1572,42 @@ func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) 
 		paths, uint32(securityInfo), f.mapping, f.fs.ctx,
 	)
 	if secErr != nil {
-		// If the compound batch itself failed, return entries without security info
-		// and propagate the batch error on the first entry.
+		// If the compound batch itself failed, return entries without security
+		// info and stamp the batch error on every entry.
 		entries := make([]DirEntryPlus, len(fi))
 		for i, info := range fi {
 			entries[i] = DirEntryPlus{FileInfo: info, Err: secErr}
 		}
-		return entries, errors.Join(err, secErr)
+		return entries, err
 	}
 
 	entries := make([]DirEntryPlus, 0, len(fi))
 	for i, info := range fi {
 		var sd *sddl.SecurityDescriptor
 		var err error
+		// Clone: secResults[i].data is a subslice of a pooled receive buffer, so
+		// after that buffer is recycled a data hazard is introduced.
+		raw := bytes.Clone(secResults[i].data)
 		if secResults[i].err != nil {
 			if isFileDeleted(secResults[i].err) {
 				continue // file deleted between Readdir and security query
 			}
 			err = secResults[i].err
-		} else if secResults[i].data != nil {
+		} else if raw != nil {
 			var parseErr error
-			sd, parseErr = sddl.FromBinary(secResults[i].data)
+			sd, parseErr = sddl.FromBinary(raw)
 			if parseErr != nil {
+				// Retain raw even on parse failure: a caller consuming the
+				// native OS representation may still succeed with these bytes.
 				sd = nil // belt-and-suspenders assignment
 				err = fmt.Errorf("parsing security descriptor for %s: %w", info.Name(), parseErr)
 			}
 		}
 		entries = append(entries, DirEntryPlus{
-			FileInfo:           info,
-			SecurityDescriptor: sd,
-			Err:                err,
+			FileInfo:              info,
+			SecurityDescriptor:    sd,
+			RawSecurityDescriptor: raw,
+			Err:                   err,
 		})
 	}
 
@@ -2260,15 +2271,16 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 
 		if name != "." && name != ".." {
 			fi = append(fi, &FileStat{
-				CreationTime:   time.Unix(0, info.CreationTime().Nanoseconds()),
-				LastAccessTime: time.Unix(0, info.LastAccessTime().Nanoseconds()),
-				LastWriteTime:  time.Unix(0, info.LastWriteTime().Nanoseconds()),
-				ChangeTime:     time.Unix(0, info.ChangeTime().Nanoseconds()),
-				EndOfFile:      info.EndOfFile(),
-				AllocationSize: info.AllocationSize(),
-				FileAttributes: info.FileAttributes(),
-				FileId:         info.FileId(),
-				FileName:       name,
+				CreationTime:    time.Unix(0, info.CreationTime().Nanoseconds()),
+				LastAccessTime:  time.Unix(0, info.LastAccessTime().Nanoseconds()),
+				LastWriteTime:   time.Unix(0, info.LastWriteTime().Nanoseconds()),
+				ChangeTime:      time.Unix(0, info.ChangeTime().Nanoseconds()),
+				EndOfFile:       info.EndOfFile(),
+				AllocationSize:  info.AllocationSize(),
+				FileAttributes:  info.FileAttributes(),
+				FileId:          info.FileId(),
+				ReparsePointTag: info.ReparsePointTag(),
+				FileName:        name,
 			})
 		}
 
@@ -2325,6 +2337,7 @@ func (f *File) SecurityInfo(flags SecurityInformationRequestFlags) (*sddl.Securi
 	return sd, nil
 }
 
+// SecurityInfoRaw returns the raw security descriptor of the file as a byte array
 func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, error) {
 	op := "secinfo"
 	req := &smb2.QueryInfoRequest{
@@ -2339,7 +2352,9 @@ func (f *File) SecurityInfoRaw(info SecurityInformationRequestFlags) ([]byte, er
 		return nil, &os.PathError{Op: op, Path: f.name, Err: err}
 	}
 
-	return infoBytes, nil
+	// Clone: infoBytes is a subslice of a pooled receive buffer, so after that
+	// buffer is recycled a data hazard is introduced.
+	return bytes.Clone(infoBytes), nil
 }
 
 func (f *File) SetSecurityInfo(flags SecurityInformationRequestFlags, sd *sddl.SecurityDescriptor) error {
@@ -2421,7 +2436,12 @@ type FileStat struct {
 	// response has no file id; obtain one via File.Stat on an open handle. It
 	// is also 0 when the server itself supplies none, as some legacy and
 	// non-native backends do.
-	FileId   uint64
+	FileId uint64
+
+	// ReparsePointTag is the tag that identifies the file system filter
+	// associated with the data when the file is a reparse point. Otherwise, 0.
+	ReparsePointTag uint32
+
 	FileName string
 }
 
@@ -2470,6 +2490,10 @@ func (fs *FileStat) Sys() any {
 type DirEntryPlus struct {
 	os.FileInfo
 	SecurityDescriptor *sddl.SecurityDescriptor
+
+	// RawSecurityDescriptor is the security descriptor exactly as returned on
+	// the wire: a self-relative SECURITY_DESCRIPTOR blob.
+	RawSecurityDescriptor []byte
 
 	Err error // non-nil if the security query failed for this entry
 }

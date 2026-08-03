@@ -350,9 +350,9 @@ func (c FileDirectoryInformationDecoder) FileName(mc utf16le.MapChars) string {
 }
 
 // FileIdBothDirectoryInformationDecoder decodes a FILE_ID_BOTH_DIR_INFORMATION
-// entry (MS-FSCC 2.4.17). Its first 64 bytes are laid out identically to
-// FILE_DIRECTORY_INFORMATION; the trailing fields add the short name and the
-// server's 64-bit file reference number.
+// entry (MS-FSCC 2.4.22, FileIdBothDirectoryInformation). Its first 64 bytes
+// are laid out identically to FILE_DIRECTORY_INFORMATION; the trailing fields
+// add the short name and the server's 64-bit file reference number.
 type FileIdBothDirectoryInformationDecoder []byte
 
 func (c FileIdBothDirectoryInformationDecoder) IsInvalid() bool {
@@ -406,6 +406,20 @@ func (c FileIdBothDirectoryInformationDecoder) FileNameLength() uint32 {
 
 func (c FileIdBothDirectoryInformationDecoder) EaSize() uint32 {
 	return le.Uint32(c[64:68])
+}
+
+// ReparsePointTag is the reparse tag (IO_REPARSE_TAG_*) of the entry, or 0 when
+// it is not a reparse point.
+//
+// MS-FSCC 2.4.22 overloads the EaSize field: when FILE_ATTRIBUTE_REPARSE_POINT
+// is set in FileAttributes, the field holds a reparse tag (MS-FSCC 2.1.2.1)
+// instead of the extended-attribute size. This is the same union FindFirstFile
+// exposes as WIN32_FIND_DATA.dwReserved0.
+func (c FileIdBothDirectoryInformationDecoder) ReparsePointTag() uint32 {
+	if c.FileAttributes()&FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+		return 0
+	}
+	return c.EaSize()
 }
 
 func (c FileIdBothDirectoryInformationDecoder) ShortNameLength() uint8 {

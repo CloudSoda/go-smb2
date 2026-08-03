@@ -943,6 +943,57 @@ func TestSecurityDescriptor(t *testing.T) {
 	}
 }
 
+// ioReparseTagSymlink mirrors IO_REPARSE_TAG_SYMLINK. It is redeclared here
+// because internal/smb2 cannot be imported under the name this package already
+// binds to the public one.
+const ioReparseTagSymlink = uint32(0xA000000C)
+
+// TestReaddirReparsePointTag checks that a directory listing distinguishes a
+// symlink from a plain file by reparse tag, not just by the shared
+// FILE_ATTRIBUTE_REPARSE_POINT bit.
+//
+// Only symlinks are covered, because the library exposes no way to create a
+// junction. No tag-specific coverage is lost by that: the decoder returns the
+// field verbatim and never interprets the tag value.
+func TestReaddirReparsePointTag(t *testing.T) {
+	if fs == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestReaddirReparsePointTag", os.Getpid())
+	require.NoError(t, fs.Mkdir(testDir, 0755))
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
+
+	f, err := fs.Create(testDir + `\plainFile`)
+	require.NoError(t, err)
+	f.Close()
+
+	if err := fs.Symlink(testDir+`\plainFile`, testDir+`\linkToPlainFile`); err != nil {
+		t.Skip("server doesn't support reparse point:", err)
+	}
+
+	d, err := fs.Open(testDir)
+	require.NoError(t, err)
+	defer d.Close()
+
+	infos, err := d.Readdir(-1)
+	require.NoError(t, err)
+
+	tags := make(map[string]uint32, len(infos))
+	for _, info := range infos {
+		st, ok := info.Sys().(*smb2.FileStat)
+		require.True(t, ok, "entry %s: expected *smb2.FileStat", info.Name())
+		tags[info.Name()] = st.ReparsePointTag
+	}
+
+	require.Contains(t, tags, "plainFile")
+	require.Contains(t, tags, "linkToPlainFile")
+	require.Equal(t, uint32(0), tags["plainFile"], "a plain file carries no reparse tag")
+	require.Equal(t, ioReparseTagSymlink, tags["linkToPlainFile"])
+}
+
 func TestReaddirPlus(t *testing.T) {
 	if fs == nil {
 		t.Skip()
