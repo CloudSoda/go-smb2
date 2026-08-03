@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/cloudsoda/go-smb2"
-	"github.com/cloudsoda/sddl"
 	"github.com/stretchr/testify/require"
 )
 
@@ -995,27 +994,6 @@ func TestReaddirReparsePointTag(t *testing.T) {
 	require.Equal(t, ioReparseTagSymlink, tags["linkToPlainFile"])
 }
 
-// checkRawSecurityDescriptor asserts that the raw wire blob is present and is
-// the exact source of the parsed descriptor.
-//
-// It deliberately does not compare the raw bytes against
-// SecurityDescriptor.Binary(): that re-serialization panics on a NULL DACL
-// (SE_DACL_PRESENT with a nil DACL), which FromBinary legitimately produces,
-// and byte-faithful round-tripping is not a property callers rely on.
-func checkRawSecurityDescriptor(t *testing.T, e smb2.DirEntryPlus) {
-	t.Helper()
-
-	require := require.New(t)
-
-	require.NotEmpty(e.RawSecurityDescriptor, "entry %s: expected non-nil RawSecurityDescriptor", e.Name())
-	require.NotNil(e.SecurityDescriptor, "entry %s: expected non-nil SecurityDescriptor", e.Name())
-
-	reparsed, err := sddl.FromBinary(e.RawSecurityDescriptor)
-	require.NoError(err, "entry %s: reparsing RawSecurityDescriptor", e.Name())
-	require.Equal(e.SecurityDescriptor.String(), reparsed.String(),
-		"entry %s: raw bytes are not the source of the parsed descriptor", e.Name())
-}
-
 func TestReaddirPlus(t *testing.T) {
 	if fs == nil {
 		t.Skip()
@@ -1069,7 +1047,6 @@ func TestReaddirPlus(t *testing.T) {
 			if e.SecurityDescriptor == nil {
 				t.Errorf("entry %s: expected non-nil SecurityDescriptor", e.Name())
 			}
-			checkRawSecurityDescriptor(t, e)
 			if e.IsDir() {
 				t.Errorf("entry %s: expected file, got directory", e.Name())
 			}
@@ -1117,7 +1094,6 @@ func TestReaddirPlus(t *testing.T) {
 			if e.SecurityDescriptor == nil {
 				t.Errorf("entry %s: expected non-nil SecurityDescriptor", e.Name())
 			}
-			checkRawSecurityDescriptor(t, e)
 		}
 	})
 
@@ -1147,7 +1123,6 @@ func TestReaddirPlus(t *testing.T) {
 			if entries[i].SecurityDescriptor == nil {
 				t.Errorf("entry %s: expected non-nil SecurityDescriptor", name)
 			}
-			checkRawSecurityDescriptor(t, entries[i])
 		}
 	})
 

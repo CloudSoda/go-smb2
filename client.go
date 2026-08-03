@@ -1,6 +1,7 @@
 package smb2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -1584,7 +1585,9 @@ func (f *File) ReaddirPlus(n int, securityInfo SecurityInformationRequestFlags) 
 	for i, info := range fi {
 		var sd *sddl.SecurityDescriptor
 		var err error
-		raw := secResults[i].data
+		// Clone: secResults[i].data is a subslice of a pooled receive buffer, so
+		// after that buffer is recycled a data hazard is introduced.
+		raw := bytes.Clone(secResults[i].data)
 		if secResults[i].err != nil {
 			if isFileDeleted(secResults[i].err) {
 				continue // file deleted between Readdir and security query
