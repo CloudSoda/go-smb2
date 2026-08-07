@@ -139,6 +139,56 @@ func (c SymbolicLinkReparseDataBufferDecoder) PrintName(mc utf16le.MapChars) str
 	return utf16le.Decode(c.PathBuffer()[off:off+len], mc)
 }
 
+// ValidateNegotiateInfoRequest is the FSCTL_VALIDATE_NEGOTIATE_INFO input body.
+// MS-SMB2 §2.2.31.4: Capabilities (4) + Guid (16) + SecurityMode (2) +
+// DialectCount (2) + Dialects (DialectCount*2).
+type ValidateNegotiateInfoRequest struct {
+	Capabilities uint32
+	Guid         [16]byte
+	SecurityMode uint16
+	Dialects     []uint16
+}
+
+func (c *ValidateNegotiateInfoRequest) Size() int {
+	return 4 + 16 + 2 + 2 + len(c.Dialects)*2
+}
+
+func (c *ValidateNegotiateInfoRequest) Encode(p []byte) {
+	le.PutUint32(p[:4], c.Capabilities)
+	copy(p[4:20], c.Guid[:])
+	le.PutUint16(p[20:22], c.SecurityMode)
+	le.PutUint16(p[22:24], uint16(len(c.Dialects)))
+	for i, d := range c.Dialects {
+		le.PutUint16(p[24+2*i:26+2*i], d)
+	}
+}
+
+// ValidateNegotiateInfoResponseDecoder decodes the 24-byte
+// FSCTL_VALIDATE_NEGOTIATE_INFO response body.
+// MS-SMB2 §2.2.32.6: Capabilities (4) + Guid (16) + SecurityMode (2) +
+// Dialect (2).
+type ValidateNegotiateInfoResponseDecoder []byte
+
+func (r ValidateNegotiateInfoResponseDecoder) IsInvalid() bool {
+	return len(r) < 24
+}
+
+func (r ValidateNegotiateInfoResponseDecoder) Capabilities() uint32 {
+	return le.Uint32(r[:4])
+}
+
+func (r ValidateNegotiateInfoResponseDecoder) Guid() []byte {
+	return r[4:20]
+}
+
+func (r ValidateNegotiateInfoResponseDecoder) SecurityMode() uint16 {
+	return le.Uint16(r[20:22])
+}
+
+func (r ValidateNegotiateInfoResponseDecoder) Dialect() uint16 {
+	return le.Uint16(r[22:24])
+}
+
 type SrvRequestResumeKeyResponseDecoder []byte
 
 func (c SrvRequestResumeKeyResponseDecoder) IsInvalid() bool {
