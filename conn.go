@@ -149,6 +149,21 @@ retry:
 	conn.maxWriteSize = r.MaxWriteSize()
 	conn.sequenceWindow = 1
 
+	// Compute the per-frame receive cap from the negotiated sizes.  Use the
+	// largest of the three server-advertised limits plus a small header/
+	// encryption overhead (256 bytes).  Callers may lower this further via
+	// Dialer.MaxPacketSize after negotiate returns.
+	{
+		maxPkt := conn.maxTransactSize
+		if conn.maxReadSize > maxPkt {
+			maxPkt = conn.maxReadSize
+		}
+		if conn.maxWriteSize > maxPkt {
+			maxPkt = conn.maxWriteSize
+		}
+		conn.recvMaxSize.Store(maxPkt + 256)
+	}
+
 	// conn.gssNegotiateToken = r.SecurityBuffer()
 	// conn.clientGuid = n.ClientGuid
 	// copy(conn.serverGuid[:], r.ServerGuid())
@@ -334,6 +349,12 @@ type conn struct {
 	recvPool      sync.Pool // reusable receive buffers
 	encodeBuf     []byte    // retained request encoding buffer; reused under conn.m
 	compoundSizes []int     // retained sizes buffer for compound requests; reused under conn.m
+
+	// recvMaxSize is the per-frame allocation cap enforced in runReceiver.
+	// Zero means "use the pre-negotiation fallback" (1 MiB).  Set to the
+	// negotiated max once NEGOTIATE completes; may be overridden lower by
+	// Dialer.MaxPacketSize.
+	recvMaxSize atomic.Uint32
 
 	m sync.Mutex
 
@@ -836,6 +857,27 @@ func (conn *conn) runReceiver() {
 		if e != nil {
 			err = &TransportError{e}
 
+			goto exit
+		}
+
+		// Reject frames that are too small to contain a valid header.
+		// A TRANSFORM_HEADER is 52 bytes; a plain SMB2 header is 64 bytes.
+		// Anything smaller cannot be a well-formed packet.
+		if n < 52 {
+			err = &InvalidResponseError{"frame size too small"}
+			goto exit
+		}
+
+		// Enforce an upper bound on per-frame allocations to prevent a
+		// hostile server from driving unbounded memory pressure.
+		// recvMaxSize is 0 before negotiation completes; fall back to 1 MiB.
+		const prenegotiateMaxPacket uint32 = 1 << 20 // 1 MiB
+		limit := conn.recvMaxSize.Load()
+		if limit == 0 {
+			limit = prenegotiateMaxPacket
+		}
+		if uint32(n) > limit {
+			err = &InvalidResponseError{"frame size exceeds limit"}
 			goto exit
 		}
 

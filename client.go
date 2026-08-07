@@ -54,8 +54,15 @@ func (se *SecurityDescriptorEncoder) Size() int {
 // Dialer contains options for func (*Dialer) Dial.
 type Dialer struct {
 	MaxCreditBalance uint16 // if it's zero, clientMaxCreditBalance is used. (See feature.go for more details)
-	Negotiator       Negotiator
-	Initiator        Initiator
+	// MaxPacketSize caps the per-frame receive allocation enforced in the
+	// receiver goroutine.  If zero, the cap is derived from the server's
+	// advertised maxTransactSize / maxReadSize / maxWriteSize (plus a small
+	// overhead) once negotiation completes, falling back to 1 MiB before
+	// negotiation.  Set this to a lower value to further restrict memory
+	// usage against a potentially hostile server.
+	MaxPacketSize uint32
+	Negotiator    Negotiator
+	Initiator     Initiator
 }
 
 /*
@@ -102,6 +109,13 @@ func (d *Dialer) DialConn(ctx context.Context, tcpConn net.Conn, address string)
 	conn, err := d.Negotiator.negotiate(ctx, direct(tcpConn), a)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply any caller-supplied per-frame receive cap.  A non-zero value
+	// overrides the negotiated default; it should be no smaller than the
+	// largest expected SMB2 payload (maxReadSize + header overhead).
+	if d.MaxPacketSize != 0 {
+		conn.recvMaxSize.Store(d.MaxPacketSize)
 	}
 
 	s, err := sessionSetup(ctx, conn, d.Initiator)
@@ -286,7 +300,13 @@ func (c *Session) ListSharenames() ([]string, error) {
 				return nil, &os.PathError{Op: "listSharenames", Path: f.name, Err: &InvalidResponseError{"broken net share enum response format"}}
 			}
 
-			for r2.IsIncomplete() {
+			const maxShareEnumBytes = 1 << 20 // 1 MiB
+			const maxShareEnumIters = 64
+			for iter := 0; r2.IsIncomplete(); iter++ {
+				if iter >= maxShareEnumIters || len(output) >= maxShareEnumBytes {
+					return nil, &os.PathError{Op: "listSharenames", Path: f.name, Err: &InvalidResponseError{"share enumeration response too large"}}
+				}
+
 				n, err := f.readAt(buf, 0)
 				if err != nil {
 					return nil, &os.PathError{Op: "listSharenames", Path: f.name, Err: err}
