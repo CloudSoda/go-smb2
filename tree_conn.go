@@ -235,6 +235,13 @@ func treeConnect(ctx context.Context, s *session, path string, flags uint16, mc 
 		// maximalAccess: r.MaximalAccess(),
 	}
 
+	if tc.requireEncryption {
+		if tc.session.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA == 0 &&
+			tc.shareFlags&smb2.SMB2_SHAREFLAG_ENCRYPT_DATA == 0 {
+			return nil, &InvalidResponseError{"encryption required but neither session nor share is encrypted"}
+		}
+	}
+
 	return tc, nil
 }
 

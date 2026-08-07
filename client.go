@@ -172,6 +172,35 @@ func (c *Session) Echo() error {
 	return c.s.echo(c.ctx)
 }
 
+// Dialect returns the SMB dialect version negotiated for this session
+// (e.g. DialectSMB311). The value matches the DialectRevision field in the
+// NEGOTIATE response (MS-SMB2 §2.2.4).
+func (c *Session) Dialect() uint16 {
+	return c.s.dialect
+}
+
+// IsSigned reports whether message signing is required on this session.
+// This is true when either the client set RequireMessageSigning or the server
+// demanded signing (SMB2_NEGOTIATE_SIGNING_REQUIRED).
+func (c *Session) IsSigned() bool {
+	return c.s.requireSigning
+}
+
+// IsEncrypted reports whether the server set SMB2_SESSION_FLAG_ENCRYPT_DATA
+// for this session. When true, every SMB message on the session is encrypted
+// regardless of the per-share setting.
+func (c *Session) IsEncrypted() bool {
+	return c.s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0
+}
+
+// CipherID returns the cipher algorithm negotiated for SMB 3.x encryption,
+// e.g. CipherAES128GCM or CipherAES128CCM. Returns 0 for SMB 2.x sessions
+// (which do not support encryption) and for SMB 3.0/3.0.2 sessions (which use
+// AES-128-CCM implicitly without an explicit cipher negotiation context).
+func (c *Session) CipherID() uint16 {
+	return c.s.cipherId
+}
+
 // Mount mounts the SMB share.
 // sharename must follow format like `<share>` or `\\<server>\<share>`.
 // Note that the mounted share doesn't inherit session's context.
@@ -337,6 +366,15 @@ func (fs *Share) WithContext(ctx context.Context) *Share {
 // Umount disconects the current SMB tree.
 func (fs *Share) Umount() error {
 	return fs.treeConn.disconnect(fs.ctx)
+}
+
+// IsEncrypted reports whether SMB encryption is active for this share.
+// It returns true when the session carries SMB2_SESSION_FLAG_ENCRYPT_DATA
+// (all trees on the session are encrypted) or the tree-connect reply carries
+// SMB2_SHAREFLAG_ENCRYPT_DATA (this share requires encryption).
+func (fs *Share) IsEncrypted() bool {
+	return fs.treeConn.session.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA != 0 ||
+		fs.treeConn.shareFlags&smb2.SMB2_SHAREFLAG_ENCRYPT_DATA != 0
 }
 
 func (fs *Share) Create(name string) (*File, error) {
