@@ -4,6 +4,17 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
+// SMB dialects, in the order the protocol ranks them. Use them with
+// Negotiator.MinDialect and Negotiator.MaxDialect to bound what the client
+// will speak, or with Negotiator.SpecifiedDialect to pin exactly one.
+const (
+	SMB202 uint16 = 0x202
+	SMB210 uint16 = 0x210
+	SMB300 uint16 = 0x300
+	SMB302 uint16 = 0x302
+	SMB311 uint16 = 0x311
+)
+
 // client
 
 const (
