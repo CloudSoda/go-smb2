@@ -1158,6 +1158,9 @@ func TestDialectBounds(t *testing.T) {
 		{"floor at SMB 3.0.0", smb2.SMB300, 0},
 		{"ceiling at SMB 2.1", 0, smb2.SMB210},
 		{"pinned to SMB 3.1.1 by an equal floor and ceiling", smb2.SMB311, smb2.SMB311},
+		// SMB 2.0.2 is the oldest dialect the client offers and the one
+		// whose session setup differs most from the rest.
+		{"pinned to SMB 2.0.2 by an equal floor and ceiling", smb2.SMB202, smb2.SMB202},
 	}
 
 	for _, tt := range tests {
