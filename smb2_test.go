@@ -895,7 +895,8 @@ func TestGlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected5 := []string{}
+	// No matches is a nil slice, as filepath.Glob returns.
+	var expected5 []string
 
 	if !reflect.DeepEqual(matches5, expected5) {
 		t.Errorf("unexpected matches: %v != %v", matches5, expected5)
@@ -1141,4 +1142,72 @@ func TestReaddirPlus(t *testing.T) {
 			t.Errorf("expected 0 entries, got %d", len(entries))
 		}
 	})
+}
+
+// A directory that matches nothing must not discard the matches already
+// found in the directories walked before it.
+func TestGlobKeepsEarlierMatches(t *testing.T) {
+	if fs == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestGlobKeepsEarlierMatches", os.Getpid())
+	if err := fs.Mkdir(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
+
+	// "aa" holds a match, "bb" is walked afterwards and holds none.
+	for _, dir := range []string{"aa", "bb"} {
+		if err := fs.Mkdir(join(testDir, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fs.WriteFile(join(testDir, "aa", "hit.ext"), []byte("hello"), 0666); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := fs.Glob(join(testDir, "*", "hit.ext"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := []string{join(testDir, "aa", "hit.ext")}
+	if !reflect.DeepEqual(matches, expected) {
+		t.Errorf("unexpected matches: %v != %v", matches, expected)
+	}
+}
+
+// An I/O error must reach the caller. Reporting it as "no matches" hides a
+// misconfigured share behind an empty result.
+func TestGlobReportsIOError(t *testing.T) {
+	if session == nil {
+		t.Skip()
+	}
+
+	share, err := session.Mount(fsName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := share.Umount(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The share is gone, so this is a filesystem that cannot answer rather
+	// than a pattern that fails to match.
+	matches, err := share.Glob("*.ext")
+	if err == nil {
+		t.Fatalf("expected an error, got matches %v", matches)
+	}
+	if len(matches) != 0 {
+		t.Errorf("unexpected matches alongside the error: %v", matches)
+	}
+
+	// A literal pattern takes a different path through Glob and must report
+	// the same way.
+	if _, err := share.Glob("nometa.ext"); err == nil {
+		t.Error("expected an error for a pattern with no metacharacters")
+	}
 }
