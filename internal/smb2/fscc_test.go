@@ -79,3 +79,57 @@ func TestFileIdBothDirectoryInformationDecoderIsInvalid(t *testing.T) {
 			"truncation to %d bytes not reported invalid", n)
 	}
 }
+
+// IsInvalid is the guard that makes a buffer safe to read, so it has to be
+// safe to call on a buffer of any length. These three measure a variable-length
+// field before checking the fixed part is present at all, which is a panic in
+// the one function whose job is to prevent one.
+//
+// The resume-key decoder is the reachable case: client.go hands it the ioctl
+// output buffer straight from the server during a server-side copy.
+func TestIsInvalidOnTruncatedBuffers(t *testing.T) {
+	tests := []struct {
+		name string
+		// fixed is the size of the fixed part, below which the buffer cannot
+		// describe its own variable part.
+		fixed     int
+		isInvalid func(b []byte) bool
+	}{
+		{
+			name:      "SrvRequestResumeKeyResponse",
+			fixed:     28,
+			isInvalid: func(b []byte) bool { return SrvRequestResumeKeyResponseDecoder(b).IsInvalid() },
+		},
+		{
+			name:      "FileDirectoryInformation",
+			fixed:     64,
+			isInvalid: func(b []byte) bool { return FileDirectoryInformationDecoder(b).IsInvalid() },
+		},
+		{
+			name:      "FileQuotaInformation",
+			fixed:     40,
+			isInvalid: func(b []byte) bool { return FileQuotaInformationDecoder(b).IsInvalid() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for n := 0; n < tt.fixed; n++ {
+				b := make([]byte, n)
+				// Fill with 0xff so a length field read out of bounds would
+				// also be the largest possible value, not a quiet zero.
+				for i := range b {
+					b[i] = 0xff
+				}
+				if !tt.isInvalid(b) {
+					t.Errorf("%d bytes accepted, fixed part is %d", n, tt.fixed)
+				}
+			}
+
+			// The fixed part alone, with a zero variable length, is valid.
+			if tt.isInvalid(make([]byte, tt.fixed)) {
+				t.Errorf("%d bytes rejected, which is the whole fixed part", tt.fixed)
+			}
+		})
+	}
+}
