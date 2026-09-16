@@ -64,7 +64,8 @@ The returned session doesn't inherit the context. If you want to use the same
 context call Session.WithContext.
 */
 func (d *Dialer) Dial(ctx context.Context, address string) (*Session, error) {
-	conn, err := net.Dial("tcp", address)
+	nd := &net.Dialer{}
+	conn, err := nd.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("establishing TCP connection: %w", err)
 	}
