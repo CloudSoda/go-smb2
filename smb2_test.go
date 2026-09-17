@@ -749,6 +749,60 @@ func TestListSharenames(t *testing.T) {
 	}
 }
 
+func TestListShares(t *testing.T) {
+	if session == nil {
+		t.Skip()
+	}
+	shares, err := session.ListShares()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := make(map[string]smb2.ShareInfo, len(shares))
+	for _, s := range shares {
+		byName[s.Name] = s
+	}
+
+	for _, expected := range []string{fsName, rfsName} {
+		s, ok := byName[expected]
+		if !ok {
+			t.Errorf("couldn't find share %s in %v", expected, shares)
+			continue
+		}
+		if s.Type() != smb2.ShareTypeDiskTree {
+			t.Errorf("share %s: expected a disk share, got %s (%#08x)", expected, s.Type(), s.TypeFlags)
+		}
+		if s.IsSpecial() {
+			t.Errorf("share %s: unexpectedly flagged as an administrative share", expected)
+		}
+	}
+
+	// Some servers, such as OneFS, do not list IPC$.
+	if s, ok := byName["IPC$"]; ok {
+		if s.Type() != smb2.ShareTypeIPC {
+			t.Errorf("IPC$: expected an IPC share, got %s (%#08x)", s.Type(), s.TypeFlags)
+		}
+		if !s.IsSpecial() {
+			t.Error("IPC$: expected it to be flagged as an administrative share")
+		}
+	}
+
+	// Both call NetrShareEnum, which returns shares in the order they were
+	// added to the server.
+	names, err := session.ListSharenames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != len(shares) {
+		t.Fatalf("ListSharenames returned %d names, ListShares returned %d shares", len(names), len(shares))
+	}
+	for i, name := range names {
+		if shares[i].Name != name {
+			t.Errorf("entry %d: ListSharenames has %q, ListShares has %q", i, name, shares[i].Name)
+		}
+	}
+}
+
 func TestServerSideCopy(t *testing.T) {
 	if fs == nil {
 		t.Skip()
