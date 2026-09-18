@@ -1,6 +1,7 @@
 package srvsvc
 
 import (
+	"bytes"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -319,6 +320,26 @@ func TestNetShareEnumAllRequestUnionSwitch(t *testing.T) {
 		levelOff := roundup(16+(len("srv")+1)*2, 4)
 		require.Equal(t, uint32(level), le.Uint32(b[levelOff:levelOff+4]), "level %d", level)
 		require.Equal(t, uint32(level), le.Uint32(b[levelOff+4:levelOff+8]), "union switch for level %d", level)
+	}
+}
+
+// Encode must not assume that the caller zeroed b: it writes the string's
+// terminating NUL and the padding that follows it.
+func TestNetShareEnumAllRequestDirtyBuffer(t *testing.T) {
+	names := []string{"fileserver", "srv", "a", "", "ünïcødé-host", "abc😀"}
+
+	for _, name := range names {
+		for _, level := range []ShareInfoLevel{ShareInfoLevel0, ShareInfoLevel1} {
+			r := &NetShareEnumAllRequest{ServerName: name, Level: level}
+
+			zeroed := make([]byte, r.Size())
+			r.Encode(zeroed)
+
+			dirty := bytes.Repeat([]byte{0xff}, r.Size())
+			r.Encode(dirty)
+
+			require.Equal(t, zeroed, dirty, "server name %q at level %d", name, level)
+		}
 	}
 }
 

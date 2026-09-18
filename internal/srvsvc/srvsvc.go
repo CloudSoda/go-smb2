@@ -139,10 +139,13 @@ func (r *NetShareEnumAllRequest) Encode(b []byte) {
 	le.PutUint32(b[8:12], 0)              // offset
 	le.PutUint32(b[12:16], uint32(count)) // actual count
 
-	utf16le.EncodeSlice(b[16:], r.ServerName, utf16le.MapCharsNone)
+	n := utf16le.EncodeSlice(b[16:], r.ServerName, utf16le.MapCharsNone)
 
-	off := 16 + count*2
-	off = roundup(off, 4)
+	off := roundup(16+count*2, 4)
+
+	// EncodeSlice writes neither the NUL that actual_count includes nor the
+	// padding that follows it, and Encode may not assume b is zeroed.
+	clear(b[16+n : off])
 
 	// InfoStruct
 
