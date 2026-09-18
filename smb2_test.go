@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cloudsoda/go-smb2"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -746,6 +747,46 @@ func TestListSharenames(t *testing.T) {
 		if !found {
 			t.Errorf("couldn't find share name %s in %v", expected, names)
 		}
+	}
+}
+
+func TestListShares(t *testing.T) {
+	if session == nil {
+		t.Skip()
+	}
+	shares, err := session.ListShares()
+	require.NoError(t, err)
+
+	byName := make(map[string]smb2.ShareInfo, len(shares))
+	for _, s := range shares {
+		byName[s.Name] = s
+	}
+
+	for _, expected := range []string{fsName, rfsName} {
+		s, ok := byName[expected]
+		if !assert.True(t, ok, "couldn't find share %s in %v", expected, shares) {
+			continue
+		}
+		assert.Equal(t, smb2.ShareTypeDiskTree, s.Type(),
+			"share %s: expected a disk share, TypeFlags %#08x", expected, s.TypeFlags)
+		assert.False(t, s.IsSpecial(),
+			"share %s: unexpectedly flagged as an administrative share", expected)
+	}
+
+	// Some servers, such as OneFS, do not list IPC$.
+	if s, ok := byName["IPC$"]; ok {
+		assert.Equal(t, smb2.ShareTypeIPC, s.Type(), "IPC$: TypeFlags %#08x", s.TypeFlags)
+		assert.True(t, s.IsSpecial(), "IPC$: expected it to be flagged as an administrative share")
+	}
+
+	// Both call NetrShareEnum, which returns shares in the order they were
+	// added to the server.
+	names, err := session.ListSharenames()
+	require.NoError(t, err)
+	require.Len(t, names, len(shares), "ListSharenames and ListShares disagree on the share count")
+	for i, name := range names {
+		assert.Equal(t, name, shares[i].Name,
+			"entry %d: ListSharenames and ListShares disagree", i)
 	}
 }
 
