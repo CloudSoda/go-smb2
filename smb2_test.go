@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cloudsoda/go-smb2"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -754,9 +755,7 @@ func TestListShares(t *testing.T) {
 		t.Skip()
 	}
 	shares, err := session.ListShares()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	byName := make(map[string]smb2.ShareInfo, len(shares))
 	for _, s := range shares {
@@ -765,41 +764,29 @@ func TestListShares(t *testing.T) {
 
 	for _, expected := range []string{fsName, rfsName} {
 		s, ok := byName[expected]
-		if !ok {
-			t.Errorf("couldn't find share %s in %v", expected, shares)
+		if !assert.True(t, ok, "couldn't find share %s in %v", expected, shares) {
 			continue
 		}
-		if s.Type() != smb2.ShareTypeDiskTree {
-			t.Errorf("share %s: expected a disk share, got %s (%#08x)", expected, s.Type(), s.TypeFlags)
-		}
-		if s.IsSpecial() {
-			t.Errorf("share %s: unexpectedly flagged as an administrative share", expected)
-		}
+		assert.Equal(t, smb2.ShareTypeDiskTree, s.Type(),
+			"share %s: expected a disk share, TypeFlags %#08x", expected, s.TypeFlags)
+		assert.False(t, s.IsSpecial(),
+			"share %s: unexpectedly flagged as an administrative share", expected)
 	}
 
 	// Some servers, such as OneFS, do not list IPC$.
 	if s, ok := byName["IPC$"]; ok {
-		if s.Type() != smb2.ShareTypeIPC {
-			t.Errorf("IPC$: expected an IPC share, got %s (%#08x)", s.Type(), s.TypeFlags)
-		}
-		if !s.IsSpecial() {
-			t.Error("IPC$: expected it to be flagged as an administrative share")
-		}
+		assert.Equal(t, smb2.ShareTypeIPC, s.Type(), "IPC$: TypeFlags %#08x", s.TypeFlags)
+		assert.True(t, s.IsSpecial(), "IPC$: expected it to be flagged as an administrative share")
 	}
 
 	// Both call NetrShareEnum, which returns shares in the order they were
 	// added to the server.
 	names, err := session.ListSharenames()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(names) != len(shares) {
-		t.Fatalf("ListSharenames returned %d names, ListShares returned %d shares", len(names), len(shares))
-	}
+	require.NoError(t, err)
+	require.Len(t, names, len(shares), "ListSharenames and ListShares disagree on the share count")
 	for i, name := range names {
-		if shares[i].Name != name {
-			t.Errorf("entry %d: ListSharenames has %q, ListShares has %q", i, name, shares[i].Name)
-		}
+		assert.Equal(t, name, shares[i].Name,
+			"entry %d: ListSharenames and ListShares disagree", i)
 	}
 }
 
