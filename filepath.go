@@ -235,6 +235,15 @@ func getEsc(chunk string) (r rune, nchunk string, err error) {
 }
 
 // Glob should work like filepath.Glob.
+//
+// It differs from filepath.Glob in what it does with I/O errors. filepath.Glob
+// ignores them, which is reasonable for a local filesystem where the only
+// likely cause is a directory the caller may not read. Here the same silence
+// also covers a share that cannot be reached, a permission the account was not
+// granted and a connection that has dropped, and reporting any of those as "no
+// matches" hides a misconfiguration behind an empty result. A path that simply
+// does not exist is still not an error, because that is the pattern failing to
+// match rather than the filesystem failing to answer.
 func (fs *Share) Glob(pattern string) (matches []string, err error) {
 	pattern = normPattern(pattern)
 
@@ -245,7 +254,10 @@ func (fs *Share) Glob(pattern string) (matches []string, err error) {
 
 	if !hasMeta(pattern) {
 		if _, err = fs.Lstat(pattern); err != nil {
-			return nil, nil
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil
+			}
+			return nil, err
 		}
 		return []string{pattern}, nil
 	}
@@ -297,21 +309,28 @@ func simplifyPattern(pattern string) string {
 }
 
 // glob searches for files matching pattern in the directory dir
-// and appends them to matches. If the directory cannot be
-// opened, it returns the existing matches. New matches are
-// added in lexicographical order.
+// and appends them to matches. A dir that does not exist, or that is not a
+// directory, contributes no matches and no error. Any other failure to read it
+// is returned, along with the matches found so far. New matches are added in
+// lexicographical order.
 func (fs *Share) glob(dir, pattern string, matches []string) (m []string, e error) {
 	m = matches
 	fi, err := fs.Stat(dir)
 	if err != nil {
-		return // ignore I/O error
+		if errors.Is(err, os.ErrNotExist) {
+			return m, nil
+		}
+		return m, err
 	}
 	if !fi.IsDir() {
-		return // ignore I/O error
+		return m, nil
 	}
 	d, err := fs.Open(dir)
 	if err != nil {
-		return // ignore I/O error
+		if errors.Is(err, os.ErrNotExist) {
+			return m, nil
+		}
+		return m, err
 	}
 	defer d.Close()
 
@@ -327,7 +346,10 @@ L:
 			if err, ok := err.(*ResponseError); ok {
 				switch erref.NtStatus(err.Code) {
 				case erref.STATUS_NO_SUCH_FILE:
-					return []string{}, nil
+					// This directory holds nothing matching the
+					// pattern. That is not a reason to throw away
+					// what the directories before it matched.
+					return m, nil
 				case erref.STATUS_NO_MORE_FILES:
 					break L
 				}
