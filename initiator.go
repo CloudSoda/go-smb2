@@ -25,6 +25,13 @@ type NTLMInitiator struct {
 	Workstation string
 	TargetSPN   string
 
+	// SendEmptyDomain authenticates with no domain at all. Leaving Domain
+	// empty does not do this: the domain the server names in its challenge is
+	// sent instead, because an empty Domain cannot be told apart from one that
+	// was never set. Some servers accept only an empty domain, which is what
+	// smbclient sends when none is given.
+	SendEmptyDomain bool
+
 	ntlm   *ntlm.Client
 	seqNum uint32
 }
@@ -35,12 +42,13 @@ func (i *NTLMInitiator) OID() asn1.ObjectIdentifier {
 
 func (i *NTLMInitiator) InitSecContext() ([]byte, error) {
 	i.ntlm = &ntlm.Client{
-		User:        i.User,
-		Password:    i.Password,
-		Hash:        i.Hash,
-		Domain:      i.Domain,
-		Workstation: i.Workstation,
-		TargetSPN:   i.TargetSPN,
+		User:            i.User,
+		Password:        i.Password,
+		Hash:            i.Hash,
+		Domain:          i.Domain,
+		Workstation:     i.Workstation,
+		TargetSPN:       i.TargetSPN,
+		SendEmptyDomain: i.SendEmptyDomain,
 	}
 	nmsg, err := i.ntlm.Negotiate()
 	if err != nil {
