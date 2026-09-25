@@ -259,3 +259,88 @@ func TestClientServer(t *testing.T) {
 		})
 	}
 }
+
+// buildChallenge assembles a CHALLENGE message with the given flags, target
+// name and target info, so a server that omits either can be reproduced
+// without one.
+func buildChallenge(flags uint32, targetName, targetInfo []byte) []byte {
+	const headerLen = 56
+
+	cmsg := make([]byte, headerLen+len(targetName)+len(targetInfo))
+	copy(cmsg[:8], signature)
+	le.PutUint32(cmsg[8:12], NtLmChallenge)
+
+	off := headerLen
+
+	le.PutUint16(cmsg[12:14], uint16(len(targetName)))
+	le.PutUint16(cmsg[14:16], uint16(len(targetName)))
+	le.PutUint32(cmsg[16:20], uint32(off))
+	copy(cmsg[off:], targetName)
+	off += len(targetName)
+
+	le.PutUint32(cmsg[20:24], flags)
+
+	// 24-32 ServerChallenge, left zero: nothing here depends on its value.
+
+	le.PutUint16(cmsg[40:42], uint16(len(targetInfo)))
+	le.PutUint16(cmsg[42:44], uint16(len(targetInfo)))
+	le.PutUint32(cmsg[44:48], uint32(off))
+	copy(cmsg[off:], targetInfo)
+
+	return cmsg
+}
+
+// A server grants NTLMSSP_REQUEST_TARGET and NTLMSSP_NEGOTIATE_TARGET_INFO, or
+// does not. Refusing the ones that do not is what hirochachacha#49 reports,
+// against NAS and embedded servers that authenticate perfectly well.
+func TestChallengeWithoutOptionalFlags(t *testing.T) {
+	// A minimal AV pair list: NetBIOS domain name, then MsvAvEOL.
+	targetInfo := []byte{
+		0x02, 0x00, 0x0c, 0x00, // MsvAvNbDomainName, length 12
+		0x44, 0x00, 0x6f, 0x00, 0x6d, 0x00, 0x61, 0x00, 0x69, 0x00, 0x6e, 0x00, // "Domain"
+		0x00, 0x00, 0x00, 0x00, // MsvAvEOL
+	}
+	targetName := utf16le.Encode("SERVER", utf16le.MapCharsNone)
+
+	base := uint32(NTLMSSP_NEGOTIATE_UNICODE | NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY)
+
+	tests := []struct {
+		name  string
+		flags uint32
+	}{
+		{"both granted", base | NTLMSSP_REQUEST_TARGET | NTLMSSP_NEGOTIATE_TARGET_INFO},
+		{"no target info", base | NTLMSSP_REQUEST_TARGET},
+		{"no request target", base | NTLMSSP_NEGOTIATE_TARGET_INFO},
+		{"neither", base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{User: "user", Password: "password"}
+
+			nmsg, err := c.Negotiate()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			cmsg := buildChallenge(tt.flags, targetName, targetInfo)
+
+			amsg, err := c.Authenticate(cmsg)
+			if err != nil {
+				t.Fatalf("authenticate: %v", err)
+			}
+			if len(nmsg) == 0 {
+				t.Fatal("empty negotiate message")
+			}
+			if len(amsg) < 12 {
+				t.Fatalf("authenticate message is %d bytes", len(amsg))
+			}
+			if !bytes.Equal(amsg[:8], signature) {
+				t.Error("authenticate message does not carry the NTLM signature")
+			}
+			if got := le.Uint32(amsg[8:12]); got != NtLmAuthenticate {
+				t.Errorf("message type %d, want %d", got, NtLmAuthenticate)
+			}
+		})
+	}
+}
