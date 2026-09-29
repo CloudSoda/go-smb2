@@ -1469,6 +1469,103 @@ func (r QueryDirectoryResponseDecoder) OutputBuffer() []byte {
 // SMB2 CHANGE_NOTIFY Response
 //
 
+type ChangeNotifyResponseDecoder []byte
+
+func (r ChangeNotifyResponseDecoder) IsInvalid() bool {
+	if len(r) < 8 {
+		return true
+	}
+
+	if r.StructureSize() != 9 {
+		return true
+	}
+
+	off := r.OutputBufferOffset()
+	length := r.OutputBufferLength()
+
+	// A zero-length buffer is legal: the server may report that changes
+	// occurred without enumerating them.
+	if length == 0 {
+		return false
+	}
+
+	if uint32(off)+length > uint32(len(r))+64 {
+		return true
+	}
+
+	return false
+}
+
+func (r ChangeNotifyResponseDecoder) StructureSize() uint16 {
+	return le.Uint16(r[:2])
+}
+
+func (r ChangeNotifyResponseDecoder) OutputBufferOffset() uint16 {
+	return le.Uint16(r[2:4])
+}
+
+func (r ChangeNotifyResponseDecoder) OutputBufferLength() uint32 {
+	return le.Uint32(r[4:8])
+}
+
+// Output returns the raw FILE_NOTIFY_INFORMATION chain, or nil when the server
+// reported no individual records.
+func (r ChangeNotifyResponseDecoder) Output() []byte {
+	off := r.OutputBufferOffset()
+	length := r.OutputBufferLength()
+
+	if length == 0 {
+		return nil
+	}
+
+	// Offsets in the response are from the start of the SMB2 header.
+	return r[off-64 : uint32(off-64)+length]
+}
+
+// FileNotifyInformationDecoder decodes one FILE_NOTIFY_INFORMATION record.
+//
+//	NextEntryOffset uint32
+//	Action          uint32
+//	FileNameLength  uint32   (bytes, not characters)
+//	FileName        [] uint16 (UTF-16LE, relative to the watched directory)
+type FileNotifyInformationDecoder []byte
+
+func (c FileNotifyInformationDecoder) IsInvalid() bool {
+	if len(c) < 12 {
+		return true
+	}
+
+	if uint32(len(c)) < 12+c.FileNameLength() {
+		return true
+	}
+
+	// A non-final record must not point outside the buffer, and must move
+	// forward — a zero or backward offset would loop.
+	if next := c.NextEntryOffset(); next != 0 {
+		if next < 12 || uint32(len(c)) < next {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (c FileNotifyInformationDecoder) NextEntryOffset() uint32 {
+	return le.Uint32(c[:4])
+}
+
+func (c FileNotifyInformationDecoder) Action() uint32 {
+	return le.Uint32(c[4:8])
+}
+
+func (c FileNotifyInformationDecoder) FileNameLength() uint32 {
+	return le.Uint32(c[8:12])
+}
+
+func (c FileNotifyInformationDecoder) FileName(mc utf16le.MapChars) string {
+	return utf16le.Decode(c[12:12+c.FileNameLength()], mc)
+}
+
 // ----------------------------------------------------------------------------
 // SMB2 QUERY_INFO Response
 //
