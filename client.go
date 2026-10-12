@@ -2129,10 +2129,16 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
+	req.CreditCharge, payloadSize, err = f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return nil, err
 	}
+
+	// On a short grant, ask for only as much output as the credits cover: a
+	// server fails a request whose CreditCharge is too small for its
+	// OutputBufferLength (MS-SMB2 3.3.5.2.5). It returns the entries that fit,
+	// and Readdir calls again for the rest.
+	req.OutputBufferLength = uint32(payloadSize)
 
 	req.FileId = f.fd
 
@@ -2184,16 +2190,30 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 }
 
 func (f *File) queryInfo(req *smb2.QueryInfoRequest) (infoBytes []byte, err error) {
-	payloadSize := max(f.encodeSize(req.Input), int(req.OutputBufferLength))
+	inputSize := f.encodeSize(req.Input)
+	payloadSize := max(inputSize, int(req.OutputBufferLength))
 
 	if f.maxTransactSize() < payloadSize {
 		return nil, &InternalError{fmt.Sprintf("payload size %d exceeds max transact size %d", payloadSize, f.maxTransactSize())}
 	}
 
-	req.CreditCharge, _, err = f.fs.borrowCredits(payloadSize)
+	creditCharge, grantedPayloadSize, err := f.fs.borrowCredits(payloadSize)
 	if err != nil {
 		return nil, err
 	}
+
+	// The output buffer can shrink to fit a short grant; the input can't. Rather
+	// than send under-charged (STATUS_INVALID_PARAMETER, MS-SMB2 3.3.5.2.5) or
+	// wait for the rest while holding part of the charge, which can deadlock
+	// against other multi-credit requests doing the same, give the credits back
+	// and fail.
+	if grantedPayloadSize < inputSize {
+		f.fs.refundCredits(creditCharge)
+		return nil, &InternalError{fmt.Sprintf("granted %d credits, input of %d bytes needs more", creditCharge, inputSize)}
+	}
+
+	req.CreditCharge = creditCharge
+	req.OutputBufferLength = uint32(min(int(req.OutputBufferLength), grantedPayloadSize))
 
 	req.FileId = f.fd
 
