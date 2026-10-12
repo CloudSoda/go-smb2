@@ -816,6 +816,14 @@ func (conn *conn) runSender() {
 	}
 }
 
+// maxConsecutiveReceiverSkips is the number of consecutive malformed or
+// unrecognised frames the receiver tolerates before treating the connection as
+// broken and shutting it down.  Each successfully delivered frame resets the
+// counter.  A malicious server can otherwise cause pending callers to hang
+// forever by flooding the connection with junk while never responding to the
+// outstanding request's MessageId.
+const maxConsecutiveReceiverSkips = 5
+
 func (conn *conn) runReceiver() {
 	var err error
 
@@ -830,6 +838,8 @@ func (conn *conn) runReceiver() {
 			close(conn.wdone)
 		}
 	}()
+
+	consecutiveSkips := 0
 
 	for {
 		n, e := conn.t.ReadSize()
@@ -866,6 +876,11 @@ func (conn *conn) runReceiver() {
 
 				logger.Println("skip:", e)
 
+				consecutiveSkips++
+				if consecutiveSkips >= maxConsecutiveReceiverSkips {
+					err = &InvalidResponseError{"too many consecutive malformed packets; closing connection"}
+					goto exit
+				}
 				continue
 			}
 
@@ -883,6 +898,11 @@ func (conn *conn) runReceiver() {
 
 					logger.Println("skip:", &InvalidResponseError{"unknown session id"})
 
+					consecutiveSkips++
+					if consecutiveSkips >= maxConsecutiveReceiverSkips {
+						err = &InvalidResponseError{"too many consecutive malformed packets; closing connection"}
+						goto exit
+					}
 					continue
 				}
 			}
@@ -895,6 +915,11 @@ func (conn *conn) runReceiver() {
 		if !hasSession && p.IsInvalid() {
 			conn.freePoolBuf(rb)
 			logger.Println("skip:", &InvalidResponseError{"invalid packet header"})
+			consecutiveSkips++
+			if consecutiveSkips >= maxConsecutiveReceiverSkips {
+				err = &InvalidResponseError{"too many consecutive malformed packets; closing connection"}
+				goto exit
+			}
 			continue
 		}
 
@@ -905,6 +930,13 @@ func (conn *conn) runReceiver() {
 			}
 			if e = conn.tryHandle(pkt, e, rb); e != nil {
 				logger.Println("skip:", e)
+				consecutiveSkips++
+				if consecutiveSkips >= maxConsecutiveReceiverSkips {
+					err = &InvalidResponseError{"too many consecutive malformed packets; closing connection"}
+					goto exit
+				}
+			} else {
+				consecutiveSkips = 0
 			}
 		} else {
 			// Compound response: sub-responses share the underlying
@@ -913,6 +945,7 @@ func (conn *conn) runReceiver() {
 			// will be GC'd once all consumers finish with their pkt slices.
 
 			var next []byte
+			frameDelivered := false
 			for {
 				// validate each segment before reading its header fields.
 				if p.IsInvalid() {
@@ -937,6 +970,8 @@ func (conn *conn) runReceiver() {
 				}
 				if e = conn.tryHandle(pkt, e, nil); e != nil {
 					logger.Println("skip:", e)
+				} else {
+					frameDelivered = true
 				}
 
 				if next == nil {
@@ -945,6 +980,15 @@ func (conn *conn) runReceiver() {
 
 				pkt = next
 				p = smb2.PacketCodec(pkt)
+			}
+			if frameDelivered {
+				consecutiveSkips = 0
+			} else {
+				consecutiveSkips++
+				if consecutiveSkips >= maxConsecutiveReceiverSkips {
+					err = &InvalidResponseError{"too many consecutive malformed packets; closing connection"}
+					goto exit
+				}
 			}
 		}
 	}
