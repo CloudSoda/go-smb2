@@ -124,6 +124,58 @@ func (c *CipherContext) Encode(p []byte) {
 	}
 }
 
+type SigningContext struct {
+	SigningAlgorithms []uint16
+}
+
+func (c *SigningContext) Size() int {
+	return 8 + 2 + len(c.SigningAlgorithms)*2
+}
+
+func (c *SigningContext) Encode(p []byte) {
+	le.PutUint16(p[:2], SMB2_SIGNING_CAPABILITIES)                          // ContextType
+	le.PutUint16(p[2:4], uint16(2+len(c.SigningAlgorithms)*2))              // DataLength
+
+	{
+		d := NegotiateContextDecoder(p).Data()
+
+		{ // SigningAlgorithms
+			bs := d[2:]
+			for i, alg := range c.SigningAlgorithms {
+				le.PutUint16(bs[2*i:2*i+2], alg)
+			}
+			le.PutUint16(d[:2], uint16(len(c.SigningAlgorithms))) // SigningAlgorithmCount
+		}
+	}
+}
+
+type SigningContextDataDecoder []byte
+
+func (c SigningContextDataDecoder) IsInvalid() bool {
+	if len(c) < 2 {
+		return true
+	}
+
+	if len(c) < 2+int(c.SigningAlgorithmCount())*2 {
+		return true
+	}
+
+	return false
+}
+
+func (c SigningContextDataDecoder) SigningAlgorithmCount() uint16 {
+	return le.Uint16(c[:2])
+}
+
+func (c SigningContextDataDecoder) SigningAlgorithms() []uint16 {
+	bs := c[2:]
+	algs := make([]uint16, c.SigningAlgorithmCount())
+	for i := range algs {
+		algs[i] = le.Uint16(bs[2*i : 2*i+2])
+	}
+	return algs
+}
+
 // From SMB311
 
 type NegotiateContextDecoder []byte

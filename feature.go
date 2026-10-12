@@ -11,9 +11,17 @@ const (
 )
 
 var (
-	clientHashAlgorithms = []uint16{smb2.SHA512}
-	clientCiphers        = []uint16{smb2.AES128GCM, smb2.AES128CCM}
-	clientDialects       = []uint16{smb2.SMB311, smb2.SMB302, smb2.SMB300, smb2.SMB210, smb2.SMB202}
+	clientHashAlgorithms    = []uint16{smb2.SHA512}
+	clientCiphers           = []uint16{smb2.AES128GCM, smb2.AES128CCM}
+	clientSigningAlgorithms = []uint16{smb2.SMB2_SIGNING_AES_GMAC, smb2.SMB2_SIGNING_AES_CMAC}
+	clientDialects          = []uint16{smb2.SMB311, smb2.SMB302, smb2.SMB300, smb2.SMB210, smb2.SMB202}
+)
+
+// Signing algorithm identifiers for use with [Negotiator.SigningAlgorithms].
+// These correspond to the values defined in MS-SMB2 §2.2.3.1.7.
+const (
+	SigningAESCMAC uint16 = smb2.SMB2_SIGNING_AES_CMAC
+	SigningAESGMAC uint16 = smb2.SMB2_SIGNING_AES_GMAC
 )
 
 const (

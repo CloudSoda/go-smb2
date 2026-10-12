@@ -6,7 +6,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
-
 	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
@@ -17,6 +16,54 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
+
+// gmacSigner implements hash.Hash using AES-GMAC for SMB 3.1.1 message signing.
+// Per MS-SMB2 §3.1.4.1, the nonce for each message is formed from the 8-byte
+// MessageId (packet bytes 24–32) concatenated with the low 4 bytes of the
+// 8-byte SessionId (packet bytes 40–44).
+type gmacSigner struct {
+	aead cipher.AEAD
+	buf  []byte
+}
+
+func newGMACSigner(key []byte) (hash.Hash, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return &gmacSigner{aead: aead}, nil
+}
+
+func (g *gmacSigner) Write(p []byte) (int, error) {
+	g.buf = append(g.buf, p...)
+	return len(p), nil
+}
+
+// Sum appends the AES-GMAC tag for the accumulated message to b.
+// The nonce is derived from the SMB2 header: MessageId (bytes 24–32) ||
+// lower 4 bytes of SessionId (bytes 40–44), giving a 12-byte GCM nonce.
+func (g *gmacSigner) Sum(b []byte) []byte {
+	pkt := g.buf
+	var nonce [12]byte
+	if len(pkt) >= 48 {
+		copy(nonce[0:8], pkt[24:32])  // MessageId
+		copy(nonce[8:12], pkt[40:44]) // lower 4 bytes of SessionId
+	}
+	// GMAC = GCM with empty plaintext; returns the 16-byte authentication tag.
+	tag := g.aead.Seal(nil, nonce[:], nil, pkt)
+	return append(b, tag...)
+}
+
+func (g *gmacSigner) Reset() {
+	g.buf = g.buf[:0]
+}
+
+func (g *gmacSigner) Size() int      { return g.aead.Overhead() }
+func (g *gmacSigner) BlockSize() int { return 16 }
 
 func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error) {
 	spnego := newSpnegoClient([]Initiator{i})
@@ -104,7 +151,6 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 				h.Sum(s.preauthIntegrityHashValue[:0])
 			}
 		}
-
 	}
 
 	outputToken, err = spnego.AcceptSecContext(r.SecurityBuffer())
@@ -177,12 +223,27 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 			}
 
 			signingKey := kdf(sessionKey, []byte("SMBSigningKey\x00"), s.preauthIntegrityHashValue[:])
-			ciph, err := aes.NewCipher(signingKey)
-			if err != nil {
-				return nil, &InternalError{err.Error()}
+
+			switch conn.signingAlgorithmId {
+			case smb2.SMB2_SIGNING_AES_GMAC:
+				signer, err := newGMACSigner(signingKey)
+				if err != nil {
+					return nil, &InternalError{err.Error()}
+				}
+				verifier, err := newGMACSigner(signingKey)
+				if err != nil {
+					return nil, &InternalError{err.Error()}
+				}
+				s.signer = signer
+				s.verifier = verifier
+			default: // SMB2_SIGNING_AES_CMAC or unset
+				ciph, err := aes.NewCipher(signingKey)
+				if err != nil {
+					return nil, &InternalError{err.Error()}
+				}
+				s.signer = cmac.New(ciph)
+				s.verifier = cmac.New(ciph)
 			}
-			s.signer = cmac.New(ciph)
-			s.verifier = cmac.New(ciph)
 
 			// s.applicationKey = kdf(sessionKey, []byte("SMBAppKey\x00"), preauthIntegrityHashValue)
 

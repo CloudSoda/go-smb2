@@ -151,6 +151,10 @@ const (
 	SMB2_ENCRYPTION_CAPABILITIES
 )
 
+const (
+	SMB2_SIGNING_CAPABILITIES = 0x0008
+)
+
 // HashAlgorithms
 const (
 	SHA512 = 0x1
@@ -160,6 +164,13 @@ const (
 const (
 	AES128CCM = 1 << iota
 	AES128GCM
+)
+
+// SigningAlgorithms (SMB2_SIGNING_CAPABILITIES context)
+const (
+	SMB2_SIGNING_HMAC_SHA256 = 0x0000
+	SMB2_SIGNING_AES_CMAC    = 0x0001
+	SMB2_SIGNING_AES_GMAC    = 0x0002
 )
 
 // ----------------------------------------------------------------------------
