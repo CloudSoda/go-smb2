@@ -142,6 +142,12 @@ func (c SymbolicLinkReparseDataBufferDecoder) PrintName(mc utf16le.MapChars) str
 type SrvRequestResumeKeyResponseDecoder []byte
 
 func (c SrvRequestResumeKeyResponseDecoder) IsInvalid() bool {
+	// ContextLength reads c[24:28], so the fixed part has to be there before
+	// the variable part can be measured.
+	if len(c) < 28 {
+		return true
+	}
+
 	return uint64(len(c)) < 28+uint64(c.ContextLength())
 }
 
@@ -302,6 +308,12 @@ const (
 type FileDirectoryInformationDecoder []byte
 
 func (c FileDirectoryInformationDecoder) IsInvalid() bool {
+	// FileNameLength reads c[60:64], so the fixed part has to be there before
+	// the variable part can be measured.
+	if len(c) < 64 {
+		return true
+	}
+
 	return uint64(len(c)) < 64+uint64(c.FileNameLength())
 }
 
@@ -533,6 +545,12 @@ func (c FileFsFullSizeInformationDecoder) BytesPerSector() uint32 {
 type FileQuotaInformationDecoder []byte
 
 func (c FileQuotaInformationDecoder) IsInvalid() bool {
+	// SidLength reads c[4:8], so the fixed part has to be there before the
+	// variable part can be measured.
+	if len(c) < 40 {
+		return true
+	}
+
 	return uint64(len(c)) < 40+uint64(c.SidLength())
 }
 
