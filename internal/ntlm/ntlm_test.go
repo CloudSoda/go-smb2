@@ -259,3 +259,72 @@ func TestClientServer(t *testing.T) {
 		})
 	}
 }
+
+// domainOf reads the DomainName field out of an AUTHENTICATE message.
+// Layout: 28-30 length, 30-32 max length, 32-36 buffer offset.
+func domainOf(t *testing.T, amsg []byte) string {
+	t.Helper()
+	if len(amsg) < 36 {
+		t.Fatalf("authenticate message is %d bytes, too short to hold a domain field", len(amsg))
+	}
+	length := int(le.Uint16(amsg[28:30]))
+	offset := int(le.Uint32(amsg[32:36]))
+	if length == 0 {
+		return ""
+	}
+	if offset+length > len(amsg) {
+		t.Fatalf("domain field runs past the message: offset %d length %d in %d bytes", offset, length, len(amsg))
+	}
+	return utf16le.Decode(amsg[offset:offset+length], utf16le.MapCharsNone)
+}
+
+// An empty Domain cannot be told apart from one that was never set, so it
+// falls back to the domain the server named. SendEmptyDomain asks for the
+// empty domain that some servers require and that smbclient sends.
+func TestClientSendEmptyDomain(t *testing.T) {
+	tests := []struct {
+		name            string
+		domain          string
+		sendEmptyDomain bool
+		want            string
+	}{
+		{"unset domain falls back to the server's", "", false, "server"},
+		{"an explicit domain is sent as given", "WORKGROUP", false, "WORKGROUP"},
+		{"SendEmptyDomain sends none", "", true, ""},
+		{"SendEmptyDomain does not override an explicit domain", "WORKGROUP", true, "WORKGROUP"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{
+				User:            "user",
+				Password:        "password",
+				Domain:          tt.domain,
+				SendEmptyDomain: tt.sendEmptyDomain,
+			}
+
+			s := NewServer("server")
+			s.AddAccount("user", "password")
+
+			nmsg, err := c.Negotiate()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmsg, err := s.Challenge(nmsg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			amsg, err := c.Authenticate(cmsg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got := domainOf(t, amsg); got != tt.want {
+				t.Errorf("domain sent: %q, want %q", got, tt.want)
+			}
+
+			if err := s.Authenticate(amsg); err != nil {
+				t.Errorf("server rejected the authentication: %v", err)
+			}
+		})
+	}
+}

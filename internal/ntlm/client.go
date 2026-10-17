@@ -20,6 +20,12 @@ type Client struct {
 	Domain      string // e.g "WORKGROUP", "MicrosoftAccount"
 	Workstation string // e.g "localhost", "HOME-PC"
 
+	// SendEmptyDomain sends no domain at all rather than falling back to the
+	// one the server named in its challenge. An empty Domain cannot express
+	// this on its own, because it is indistinguishable from Domain being
+	// left unset.
+	SendEmptyDomain bool
+
 	TargetSPN string // SPN ::= "service/hostname[:port]"; e.g "cifs/remotehost:1020"
 
 	nmsg    []byte
@@ -79,7 +85,7 @@ func (c *Client) Authenticate(cmsg []byte) (amsg []byte, err error) {
 	user := utf16le.Encode(c.User, utf16le.MapCharsNone)
 	workstation := utf16le.Encode(c.Workstation, utf16le.MapCharsNone)
 
-	if domain == nil {
+	if domain == nil && !c.SendEmptyDomain {
 		domain = challengeMessage.targetName
 	}
 
