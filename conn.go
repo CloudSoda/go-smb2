@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -450,6 +451,15 @@ func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn, b
 
 				return nil, &TransportError{err}
 			}
+		case <-conn.wdone:
+			// The sender has been released, so nothing will report on this
+			// write. Like the ctx arm beside it, the packet may already be on
+			// the wire, so the window is not rolled back here.
+			if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
+				conn.refundCredits(rr.claimLoan())
+			}
+
+			return nil, &TransportError{net.ErrClosed}
 		case <-ctx.Done():
 			if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
 				conn.refundCredits(rr.claimLoan())
@@ -668,6 +678,11 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 				conn.refundCompound(rrs)
 				return nil, &TransportError{err}
 			}
+		case <-conn.wdone:
+			// As with the ctx arm beside it, the frame may already be on the
+			// wire, so only the credits are returned, not the window.
+			conn.refundCompound(rrs)
+			return nil, &TransportError{net.ErrClosed}
 		case <-ctx.Done():
 			conn.refundCompound(rrs)
 			return nil, ctx.Err()
@@ -961,6 +976,15 @@ exit:
 	defer conn.m.Unlock()
 
 	conn.outstandingRequests.shutdown(err)
+
+	// The requests in flight were told what happened, nil if this shutdown was
+	// the expected one. The connection itself is closed either way, and a
+	// request arriving after this point has to be told so: leaving conn.err nil
+	// lets sendWith proceed onto a write that the sender, released by wdone
+	// below, will never pick up.
+	if err == nil {
+		err = &TransportError{net.ErrClosed}
+	}
 
 	conn.err = err
 
