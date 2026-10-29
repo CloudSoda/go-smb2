@@ -2407,12 +2407,20 @@ func (fs *FileStat) Size() int64 {
 	return fs.EndOfFile
 }
 
+// Mode returns the file mode bits derived from FileAttributes and
+// ReparsePointTag.
+//
+// For a reparse point, the type bits depend on the tag. Only
+// IOReparseTagSymlink sets ModeSymlink, because Readlink reads only that tag
+// and Share.Stat follows only links with that tag. WSL sockets, FIFOs and
+// device files have ModeSocket, ModeNamedPipe and ModeDevice. Other name
+// surrogates, such as junctions, and reparse points whose tag is 0 because
+// the server did not report it, have ModeIrregular. None of these have
+// ModeDir, so code that walks a tree does not descend through them. Reparse
+// points with any other tag, such as deduplicated, Cloud Files and Azure File
+// Sync files and directories, have the mode of a regular file or directory.
 func (fs *FileStat) Mode() os.FileMode {
 	var m os.FileMode
-
-	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_DIRECTORY != 0 {
-		m |= os.ModeDir | 0o111
-	}
 
 	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_READONLY != 0 {
 		m |= 0o444
@@ -2420,8 +2428,31 @@ func (fs *FileStat) Mode() os.FileMode {
 		m |= 0o666
 	}
 
+	isDir := fs.FileAttributes&smb2.FILE_ATTRIBUTE_DIRECTORY != 0
+
 	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		m |= os.ModeSymlink
+		tag := fs.ReparsePointTag
+		// IOReparseTagSymlink is also a name surrogate, so it is matched first.
+		switch {
+		case tag == IOReparseTagSymlink:
+			m |= os.ModeSymlink
+			isDir = false
+		case tag == IOReparseTagAFUnix:
+			m |= os.ModeSocket
+		case tag == IOReparseTagLxFIFO:
+			m |= os.ModeNamedPipe
+		case tag == IOReparseTagLxChr:
+			m |= os.ModeDevice | os.ModeCharDevice
+		case tag == IOReparseTagLxBlk:
+			m |= os.ModeDevice
+		case tag == 0, tag.IsNameSurrogate():
+			m |= os.ModeIrregular
+			isDir = false
+		}
+	}
+
+	if isDir {
+		m |= os.ModeDir | 0o111
 	}
 
 	return m

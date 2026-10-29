@@ -7,8 +7,8 @@ import (
 )
 
 func TestReparseTagBits(t *testing.T) {
-	cases := []struct {
-		name                         string
+	testData := []struct {
+		scenario                     string
 		tag                          ReparseTag
 		microsoft, surrogate, hasDir bool
 	}{
@@ -24,11 +24,11 @@ func TestReparseTagBits(t *testing.T) {
 		{"ThirdPartyDirectory", 0x1000ABCD, false, false, true},
 	}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			require.Equal(t, c.microsoft, c.tag.IsMicrosoft(), "IsMicrosoft")
-			require.Equal(t, c.surrogate, c.tag.IsNameSurrogate(), "IsNameSurrogate")
-			require.Equal(t, c.hasDir, c.tag.IsDirectory(), "IsDirectory")
+	for _, td := range testData {
+		t.Run(td.scenario, func(t *testing.T) {
+			require.Equal(t, td.microsoft, td.tag.IsMicrosoft(), "IsMicrosoft")
+			require.Equal(t, td.surrogate, td.tag.IsNameSurrogate(), "IsNameSurrogate")
+			require.Equal(t, td.hasDir, td.tag.IsDirectory(), "IsDirectory")
 		})
 	}
 }

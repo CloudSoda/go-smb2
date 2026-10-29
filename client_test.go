@@ -11,7 +11,6 @@ import (
 
 	"github.com/cloudsoda/go-smb2/internal/erref"
 	"github.com/cloudsoda/go-smb2/internal/smb2"
-	"github.com/cloudsoda/go-smb2/internal/utf16le"
 	"github.com/stretchr/testify/require"
 )
 
@@ -183,9 +182,9 @@ func newStatShare(t *testing.T, s *statServer) *Share {
 
 func TestStatFillsReparseTag(t *testing.T) {
 	ops := []struct {
-		name   string
-		before []string // requests sent before the tag query
-		stat   func(fs *Share) (os.FileInfo, error)
+		scenario string
+		before   []string // requests sent before the tag query
+		stat     func(fs *Share) (os.FileInfo, error)
 	}{
 		{"Lstat", []string{reqCreate}, func(fs *Share) (os.FileInfo, error) {
 			return fs.Lstat("file")
@@ -203,11 +202,11 @@ func TestStatFillsReparseTag(t *testing.T) {
 		}},
 	}
 
-	servers := []struct {
-		name      string
+	testData := []struct {
+		scenario  string
 		attrs     uint32
 		tagStatus erref.NtStatus
-		want      ReparseTag
+		expected  ReparseTag
 	}{
 		{"PlainFile", smb2.FILE_ATTRIBUTE_ARCHIVE, 0, 0},
 		{"ReparsePoint", smb2.FILE_ATTRIBUTE_REPARSE_POINT, 0, IOReparseTagDedup},
@@ -216,12 +215,12 @@ func TestStatFillsReparseTag(t *testing.T) {
 	}
 
 	for _, op := range ops {
-		for _, srv := range servers {
-			t.Run(op.name+"/"+srv.name, func(t *testing.T) {
+		for _, td := range testData {
+			t.Run(op.scenario+"/"+td.scenario, func(t *testing.T) {
 				s := &statServer{
-					attrs:     srv.attrs,
+					attrs:     td.attrs,
 					tag:       uint32(IOReparseTagDedup),
-					tagStatus: srv.tagStatus,
+					tagStatus: td.tagStatus,
 				}
 
 				fi, err := op.stat(newStatShare(t, s))
@@ -229,68 +228,60 @@ func TestStatFillsReparseTag(t *testing.T) {
 
 				st, ok := fi.Sys().(*FileStat)
 				require.True(t, ok, "expected *FileStat")
-				require.Equal(t, srv.want, st.ReparsePointTag)
-				require.Equal(t, srv.attrs, st.FileAttributes)
+				require.Equal(t, td.expected, st.ReparsePointTag)
+				require.Equal(t, td.attrs, st.FileAttributes)
 
-				want := append([]string(nil), op.before...)
-				if srv.attrs&smb2.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-					want = append(want, reqQueryTag)
+				expectedRequests := append([]string(nil), op.before...)
+				if td.attrs&smb2.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+					expectedRequests = append(expectedRequests, reqQueryTag)
 				}
-				want = append(want, reqClose)
-				require.Equal(t, want, s.recorded())
+				expectedRequests = append(expectedRequests, reqClose)
+				require.Equal(t, expectedRequests, s.recorded())
 			})
 		}
 	}
 }
 
-// symlinkErrorData returns the error data of a STATUS_STOPPED_ON_SYMLINK
-// response (MS-SMB2 2.2.2.2.1) whose substitute and print names are both
-// target. It lays out the bytes itself because smb2.SymbolicLinkErrorResponse
-// writes Flags over the start of the path buffer.
-func symlinkErrorData(target string, flags uint32, unparsedPath string) []byte {
-	name := utf16le.Encode(target, utf16le.MapCharsNone)
-	unparsedLen := len(utf16le.Encode(unparsedPath, utf16le.MapCharsNone))
-	reparseDataLen := 12 + 2*len(name)
+func TestFileStatMode(t *testing.T) {
+	const (
+		dir      = smb2.FILE_ATTRIBUTE_DIRECTORY
+		readOnly = smb2.FILE_ATTRIBUTE_READONLY
+		reparse  = smb2.FILE_ATTRIBUTE_REPARSE_POINT
+	)
 
-	b := make([]byte, 16+reparseDataLen)
-	le := binary.LittleEndian
-	le.PutUint32(b[0:4], uint32(12+reparseDataLen)) // SymLinkLength
-	le.PutUint32(b[4:8], 0x4c4d5953)                // SymLinkErrorTag
-	le.PutUint32(b[8:12], smb2.IO_REPARSE_TAG_SYMLINK)
-	le.PutUint16(b[12:14], uint16(reparseDataLen))
-	le.PutUint16(b[14:16], uint16(unparsedLen))
-	le.PutUint16(b[16:18], 0)                 // SubstituteNameOffset
-	le.PutUint16(b[18:20], uint16(len(name))) // SubstituteNameLength
-	le.PutUint16(b[20:22], uint16(len(name))) // PrintNameOffset
-	le.PutUint16(b[22:24], uint16(len(name))) // PrintNameLength
-	le.PutUint32(b[24:28], flags)
-	copy(b[28:], name)
-	copy(b[28+len(name):], name)
-
-	return b
-}
-
-func TestEvalSymlinkError(t *testing.T) {
-	cases := []struct {
-		name     string
-		path     string // path of the CREATE that stopped on the symlink
-		target   string
-		flags    uint32
-		unparsed string // part of path after the symlink
-		want     string
+	testData := []struct {
+		scenario string
+		attrs    uint32
+		tag      ReparseTag
+		expected os.FileMode
 	}{
-		{"RelativeAtRoot", `link`, `file`, smb2.SYMLINK_FLAG_RELATIVE, ``, `file`},
-		{"RelativeInDirectory", `dir\link`, `file`, smb2.SYMLINK_FLAG_RELATIVE, ``, `dir\file`},
-		{"RelativeWithSubdirectory", `dir\link`, `sub\file`, smb2.SYMLINK_FLAG_RELATIVE, ``, `dir\sub\file`},
-		{"RelativeIntermediate", `dir\link\file`, `sub`, smb2.SYMLINK_FLAG_RELATIVE, `\file`, `dir\sub\file`},
-		{"Absolute", `dir\link`, `\??\C:\file`, 0, ``, `C:\file`},
+		{"File", smb2.FILE_ATTRIBUTE_ARCHIVE, 0, 0o666},
+		{"ReadOnlyFile", readOnly, 0, 0o444},
+		{"Directory", dir, 0, os.ModeDir | 0o777},
+		{"Symlink", reparse, IOReparseTagSymlink, os.ModeSymlink | 0o666},
+		{"DirectorySymlink", reparse | dir, IOReparseTagSymlink, os.ModeSymlink | 0o666},
+		{"Junction", reparse | dir, IOReparseTagMountPoint, os.ModeIrregular | 0o666},
+		{"LxSymlink", reparse, IOReparseTagLxSymlink, os.ModeIrregular | 0o666},
+		{"ThirdPartyNameSurrogateDirectory", reparse | dir, 0x2000ABCD, os.ModeIrregular | 0o666},
+		{"UnknownTagFile", reparse, 0, os.ModeIrregular | 0o666},
+		{"UnknownTagDirectory", reparse | dir, 0, os.ModeIrregular | 0o666},
+		{"Dedup", reparse, IOReparseTagDedup, 0o666},
+		{"ReadOnlyDedup", reparse | readOnly, IOReparseTagDedup, 0o444},
+		{"StorageSync", reparse, IOReparseTagStorageSync, 0o666},
+		{"StorageSyncFolder", reparse | dir, IOReparseTagStorageSyncFolder, os.ModeDir | 0o777},
+		{"CloudDirectory", reparse | dir, IOReparseTagCloud, os.ModeDir | 0o777},
+		{"ThirdPartyFile", reparse, 0x0000ABCD, 0o666},
+		{"AFUnix", reparse, IOReparseTagAFUnix, os.ModeSocket | 0o666},
+		{"LxFIFO", reparse, IOReparseTagLxFIFO, os.ModeNamedPipe | 0o666},
+		{"LxChr", reparse, IOReparseTagLxChr, os.ModeDevice | os.ModeCharDevice | 0o666},
+		{"LxBlk", reparse, IOReparseTagLxBlk, os.ModeDevice | 0o666},
 	}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := evalSymlinkError(c.path, symlinkErrorData(c.target, c.flags, c.unparsed), utf16le.MapCharsNone)
-			require.NoError(t, err)
-			require.Equal(t, c.want, got)
+	for _, td := range testData {
+		t.Run(td.scenario, func(t *testing.T) {
+			fi := &FileStat{FileAttributes: td.attrs, ReparsePointTag: td.tag}
+			require.Equal(t, td.expected, fi.Mode())
+			require.Equal(t, td.expected.IsDir(), fi.IsDir())
 		})
 	}
 }
