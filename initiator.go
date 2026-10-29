@@ -65,8 +65,3 @@ func (i *NTLMInitiator) Sum(bs []byte) []byte {
 func (i *NTLMInitiator) SessionKey() []byte {
 	return i.ntlm.Session().SessionKey()
 }
-
-//lint:ignore U1000 appears to be legacy, unsure, so leaving for now
-func (i *NTLMInitiator) infoMap() *ntlm.InfoMap {
-	return i.ntlm.Session().InfoMap()
-}

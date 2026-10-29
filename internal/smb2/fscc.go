@@ -6,18 +6,63 @@ import (
 	"github.com/cloudsoda/go-smb2/internal/utf16le"
 )
 
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4
 const (
-	IO_REPARSE_TAG_RESERVED_ZERO   = 0x00000000
-	IO_REPARSE_TAG_RESERVED_ONE    = 0x00000001
-	IO_REPARSE_TAG_MOUNT_POINT     = 0xA0000003
-	IO_REPARSE_TAG_HSM             = 0xC0000004
-	IO_REPARSE_TAG_HSM2            = 0x80000006
-	IO_REPARSE_TAG_DRIVER_EXTENDER = 0x80000005
-	IO_REPARSE_TAG_SIS             = 0x80000007
-	IO_REPARSE_TAG_DFS             = 0x8000000A
-	IO_REPARSE_TAG_DFSR            = 0x80000012
-	IO_REPARSE_TAG_FILTER_MANAGER  = 0x8000000B
-	IO_REPARSE_TAG_SYMLINK         = 0xA000000C
+	IO_REPARSE_TAG_RESERVED_ZERO       = 0x00000000
+	IO_REPARSE_TAG_RESERVED_ONE        = 0x00000001
+	IO_REPARSE_TAG_RESERVED_TWO        = 0x00000002
+	IO_REPARSE_TAG_MOUNT_POINT         = 0xA0000003
+	IO_REPARSE_TAG_HSM                 = 0xC0000004
+	IO_REPARSE_TAG_DRIVE_EXTENDER      = 0x80000005
+	IO_REPARSE_TAG_HSM2                = 0x80000006
+	IO_REPARSE_TAG_SIS                 = 0x80000007
+	IO_REPARSE_TAG_WIM                 = 0x80000008
+	IO_REPARSE_TAG_CSV                 = 0x80000009
+	IO_REPARSE_TAG_DFS                 = 0x8000000A
+	IO_REPARSE_TAG_FILTER_MANAGER      = 0x8000000B
+	IO_REPARSE_TAG_SYMLINK             = 0xA000000C
+	IO_REPARSE_TAG_IIS_CACHE           = 0xA0000010
+	IO_REPARSE_TAG_DFSR                = 0x80000012
+	IO_REPARSE_TAG_DEDUP               = 0x80000013
+	IO_REPARSE_TAG_APPXSTRM            = 0xC0000014
+	IO_REPARSE_TAG_NFS                 = 0x80000014
+	IO_REPARSE_TAG_FILE_PLACEHOLDER    = 0x80000015
+	IO_REPARSE_TAG_DFM                 = 0x80000016
+	IO_REPARSE_TAG_WOF                 = 0x80000017
+	IO_REPARSE_TAG_WCI                 = 0x80000018
+	IO_REPARSE_TAG_WCI_1               = 0x90001018
+	IO_REPARSE_TAG_GLOBAL_REPARSE      = 0xA0000019
+	IO_REPARSE_TAG_CLOUD               = 0x9000001A
+	IO_REPARSE_TAG_CLOUD_1             = 0x9000101A
+	IO_REPARSE_TAG_CLOUD_2             = 0x9000201A
+	IO_REPARSE_TAG_CLOUD_3             = 0x9000301A
+	IO_REPARSE_TAG_CLOUD_4             = 0x9000401A
+	IO_REPARSE_TAG_CLOUD_5             = 0x9000501A
+	IO_REPARSE_TAG_CLOUD_6             = 0x9000601A
+	IO_REPARSE_TAG_CLOUD_7             = 0x9000701A
+	IO_REPARSE_TAG_CLOUD_8             = 0x9000801A
+	IO_REPARSE_TAG_CLOUD_9             = 0x9000901A
+	IO_REPARSE_TAG_CLOUD_A             = 0x9000A01A
+	IO_REPARSE_TAG_CLOUD_B             = 0x9000B01A
+	IO_REPARSE_TAG_CLOUD_C             = 0x9000C01A
+	IO_REPARSE_TAG_CLOUD_D             = 0x9000D01A
+	IO_REPARSE_TAG_CLOUD_E             = 0x9000E01A
+	IO_REPARSE_TAG_CLOUD_F             = 0x9000F01A
+	IO_REPARSE_TAG_APPEXECLINK         = 0x8000001B
+	IO_REPARSE_TAG_PROJFS              = 0x9000001C
+	IO_REPARSE_TAG_LX_SYMLINK          = 0xA000001D
+	IO_REPARSE_TAG_STORAGE_SYNC        = 0x8000001E
+	IO_REPARSE_TAG_STORAGE_SYNC_FOLDER = 0x90000027
+	IO_REPARSE_TAG_WCI_TOMBSTONE       = 0xA000001F
+	IO_REPARSE_TAG_UNHANDLED           = 0x80000020
+	IO_REPARSE_TAG_ONEDRIVE            = 0x80000021
+	IO_REPARSE_TAG_PROJFS_TOMBSTONE    = 0xA0000022
+	IO_REPARSE_TAG_AF_UNIX             = 0x80000023
+	IO_REPARSE_TAG_LX_FIFO             = 0x80000024
+	IO_REPARSE_TAG_LX_CHR              = 0x80000025
+	IO_REPARSE_TAG_LX_BLK              = 0x80000026
+	IO_REPARSE_TAG_WCI_LINK            = 0xA0000027
+	IO_REPARSE_TAG_WCI_LINK_1          = 0xA0001027
 )
 
 const (
@@ -209,6 +254,14 @@ func (c SrvCopychunkResponseDecoder) TotalBytesWritten() uint32 {
 	return le.Uint32(c[8:12])
 }
 
+/*
+The following attributes are defined for files and directories. They can be
+used in any combination unless noted in the description of the attribute's
+meaning. There is no file attribute with the value 0x00000000 because a value
+of 0x00000000 in the FileAttributes field means that the file attributes for
+this file MUST NOT be changed when setting basic information for the file.
+https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/ca28ec38-f155-4768-81d6-4bfeb8586fc9
+*/
 const (
 	FILE_ATTRIBUTE_ARCHIVE             = 0x20
 	FILE_ATTRIBUTE_COMPRESSED          = 0x800
@@ -219,12 +272,13 @@ const (
 	FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x2000
 	FILE_ATTRIBUTE_OFFLINE             = 0x1000
 	FILE_ATTRIBUTE_READONLY            = 0x1
-	FILE_ATTRIBUTE_REPARSE_POINT       = 0x400
-	FILE_ATTRIBUTE_SPARSE_FILE         = 0x200
-	FILE_ATTRIBUTE_SYSTEM              = 0x4
-	FILE_ATTRIBUTE_TEMPORARY           = 0x100
-	FILE_ATTRIBUTE_INTEGRITY_STREAM    = 0x8000
-	FILE_ATTRIBUTE_NO_SCRUB_DATA       = 0x20000
+	// A file or directory that has an associated reparse point.
+	FILE_ATTRIBUTE_REPARSE_POINT    = 0x400
+	FILE_ATTRIBUTE_SPARSE_FILE      = 0x200
+	FILE_ATTRIBUTE_SYSTEM           = 0x4
+	FILE_ATTRIBUTE_TEMPORARY        = 0x100
+	FILE_ATTRIBUTE_INTEGRITY_STREAM = 0x8000
+	FILE_ATTRIBUTE_NO_SCRUB_DATA    = 0x20000
 )
 
 // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/4718fc40-e539-4014-8e33-b675af74e3e1
@@ -788,4 +842,28 @@ func (c FileNameInformationDecoder) FileNameLength() uint32 {
 
 func (c FileNameInformationDecoder) FileName(mc utf16le.MapChars) string {
 	return utf16le.Decode(c[4:4+c.FileNameLength()], mc)
+}
+
+// FileAttributeTagInformationDecoder decodes a FILE_ATTRIBUTE_TAG_INFORMATION
+// structure (MS-FSCC FileAttributeTagInformation), which holds a file's
+// attributes and reparse tag.
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/d295752f-ce89-4b98-8553-266d37c84f0e
+type FileAttributeTagInformationDecoder []byte
+
+func (c FileAttributeTagInformationDecoder) IsInvalid() bool {
+	return len(c) < 8
+}
+
+func (c FileAttributeTagInformationDecoder) FileAttributes() uint32 {
+	return le.Uint32(c[:4])
+}
+
+// ReparseTag returns the reparse tag (IO_REPARSE_TAG_*), or 0 if
+// FileAttributes does not include FILE_ATTRIBUTE_REPARSE_POINT. MS-FSCC
+// defines the field only when that attribute is set.
+func (c FileAttributeTagInformationDecoder) ReparseTag() uint32 {
+	if c.FileAttributes()&FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+		return 0
+	}
+	return le.Uint32(c[4:8])
 }

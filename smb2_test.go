@@ -984,11 +984,6 @@ func TestSecurityDescriptor(t *testing.T) {
 	}
 }
 
-// ioReparseTagSymlink mirrors IO_REPARSE_TAG_SYMLINK. It is redeclared here
-// because internal/smb2 cannot be imported under the name this package already
-// binds to the public one.
-const ioReparseTagSymlink = uint32(0xA000000C)
-
 // TestReaddirReparsePointTag checks that a directory listing distinguishes a
 // symlink from a plain file by reparse tag, not just by the shared
 // FILE_ATTRIBUTE_REPARSE_POINT bit.
@@ -1022,7 +1017,7 @@ func TestReaddirReparsePointTag(t *testing.T) {
 	infos, err := d.Readdir(-1)
 	require.NoError(t, err)
 
-	tags := make(map[string]uint32, len(infos))
+	tags := make(map[string]smb2.ReparseTag, len(infos))
 	for _, info := range infos {
 		st, ok := info.Sys().(*smb2.FileStat)
 		require.True(t, ok, "entry %s: expected *smb2.FileStat", info.Name())
@@ -1031,8 +1026,43 @@ func TestReaddirReparsePointTag(t *testing.T) {
 
 	require.Contains(t, tags, "plainFile")
 	require.Contains(t, tags, "linkToPlainFile")
-	require.Equal(t, uint32(0), tags["plainFile"], "a plain file carries no reparse tag")
-	require.Equal(t, ioReparseTagSymlink, tags["linkToPlainFile"])
+	require.Zero(t, tags["plainFile"], "a plain file carries no reparse tag")
+	require.Equal(t, smb2.IOReparseTagSymlink, tags["linkToPlainFile"])
+}
+
+// TestStatReparsePointTag does not test File.Stat, because Open follows
+// symlinks and so cannot return a handle to the link itself. The unit tests
+// cover File.Stat with a fake server.
+func TestStatReparsePointTag(t *testing.T) {
+	if fs == nil {
+		t.Skip()
+	}
+
+	testDir := fmt.Sprintf("testDir-%d-TestStatReparsePointTag", os.Getpid())
+	require.NoError(t, fs.Mkdir(testDir, 0755))
+	defer func() {
+		_ = fs.RemoveAll(testDir)
+	}()
+
+	f, err := fs.Create(testDir + `\plainFile`)
+	require.NoError(t, err)
+	f.Close()
+
+	if err := fs.Symlink(testDir+`\plainFile`, testDir+`\linkToPlainFile`); err != nil {
+		t.Skip("server doesn't support reparse point:", err)
+	}
+
+	tagOf := func(info os.FileInfo, err error) smb2.ReparseTag {
+		t.Helper()
+		require.NoError(t, err)
+		st, ok := info.Sys().(*smb2.FileStat)
+		require.True(t, ok, "%s: expected *smb2.FileStat", info.Name())
+		return st.ReparsePointTag
+	}
+
+	require.Equal(t, smb2.IOReparseTagSymlink, tagOf(fs.Lstat(testDir+`\linkToPlainFile`)))
+	require.Zero(t, tagOf(fs.Lstat(testDir+`\plainFile`)), "a plain file carries no reparse tag")
+	require.Zero(t, tagOf(fs.Stat(testDir+`\linkToPlainFile`)), "Stat follows the link to a plain file")
 }
 
 func TestReaddirPlus(t *testing.T) {
