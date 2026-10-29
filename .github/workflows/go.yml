@@ -9,7 +9,7 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: |
         sudo apt update
         sudo apt install -y samba
@@ -42,7 +42,7 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: |
         mkdir C:\tmp
         net user smbuser Smbpasswd12345 /add
