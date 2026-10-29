@@ -3,13 +3,13 @@ jobs:
   test_linux:
     strategy:
       matrix:
-        go: [1.26.1]
-    runs-on: ubuntu-24.04
+        go: [1.27.3]
+    runs-on: ubuntu-26.04
     steps:
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: |
         sudo apt update
         sudo apt install -y samba
@@ -18,7 +18,7 @@ jobs:
         (echo Smbpasswd12345; echo Smbpasswd12345) | sudo smbpasswd -a -s smbuser
         sudo cp ./.github/smb.conf /etc/samba/smb.conf
         sudo smbd
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: |
           ~/go/pkg/mod
@@ -36,19 +36,19 @@ jobs:
   test_windows:
     strategy:
       matrix:
-        go: [1.26.1]
+        go: [1.27.3]
     runs-on: windows-2022
     steps:
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: |
         mkdir C:\tmp
         net user smbuser Smbpasswd12345 /add
         net share tmp="C:\tmp" /GRANT:smbuser,full
         net share tmp2="C:\tmp" /GRANT:smbuser,read
-    - uses: actions/cache@v4
+    - uses: actions/cache@v6
       with:
         path: |
           ~/go/pkg/mod

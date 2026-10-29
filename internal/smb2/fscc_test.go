@@ -79,3 +79,24 @@ func TestFileIdBothDirectoryInformationDecoderIsInvalid(t *testing.T) {
 			"truncation to %d bytes not reported invalid", n)
 	}
 }
+
+func TestFileAttributeTagInformationDecoder(t *testing.T) {
+	require := require.New(t)
+
+	b := make([]byte, 8)
+	c := FileAttributeTagInformationDecoder(b)
+
+	le.PutUint32(b[0:4], FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_ARCHIVE)
+	le.PutUint32(b[4:8], IO_REPARSE_TAG_SYMLINK)
+	require.False(c.IsInvalid())
+	require.EqualValues(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_ARCHIVE, c.FileAttributes())
+	require.EqualValues(IO_REPARSE_TAG_SYMLINK, c.ReparseTag())
+
+	le.PutUint32(b[0:4], FILE_ATTRIBUTE_ARCHIVE)
+	require.Zero(c.ReparseTag(), "a tag without the reparse attribute is undefined")
+
+	for _, n := range []int{0, 4, 7} {
+		require.True(FileAttributeTagInformationDecoder(b[:n]).IsInvalid(),
+			"truncation to %d bytes not reported invalid", n)
+	}
+}

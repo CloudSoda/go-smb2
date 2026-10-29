@@ -627,7 +627,11 @@ func (fs *Share) Lstat(name string) (os.FileInfo, error) {
 
 	fi := f.fileStat
 
-	if err := f.close(); err != nil {
+	err = f.fillReparseTag(fi)
+	if e := f.close(); err == nil {
+		err = e
+	}
+	if err != nil {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: err}
 	}
 
@@ -661,7 +665,11 @@ func (fs *Share) Stat(name string) (os.FileInfo, error) {
 
 	fi := f.fileStat
 
-	if err := f.close(); err != nil {
+	err = f.fillReparseTag(fi)
+	if e := f.close(); err == nil {
+		err = e
+	}
+	if err != nil {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: err}
 	}
 
@@ -1120,7 +1128,11 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 		return target + u, nil
 	}
 
-	return dir(ud) + target + u, nil
+	// A relative target is relative to the directory that holds the link.
+	// split keeps that directory's trailing separator, which dir drops.
+	linkDir, _ := split(ud)
+
+	return linkDir + target + u, nil
 }
 
 func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {
@@ -1591,7 +1603,7 @@ func (f *File) stat() (os.FileInfo, error) {
 	basic := info.BasicInformation()
 	std := info.StandardInformation()
 
-	return &FileStat{
+	fi := &FileStat{
 		CreationTime:   time.Unix(0, basic.CreationTime().Nanoseconds()),
 		LastAccessTime: time.Unix(0, basic.LastAccessTime().Nanoseconds()),
 		LastWriteTime:  time.Unix(0, basic.LastWriteTime().Nanoseconds()),
@@ -1601,7 +1613,56 @@ func (f *File) stat() (os.FileInfo, error) {
 		FileAttributes: basic.FileAttributes(),
 		FileId:         uint64(info.InternalInformation().IndexNumber()),
 		FileName:       base(f.name),
-	}, nil
+	}
+
+	if err := f.fillReparseTag(fi); err != nil {
+		return nil, err
+	}
+
+	return fi, nil
+}
+
+// fillReparseTag sets fi.ReparsePointTag to the reparse tag of f, which it
+// reads with a FileAttributeTagInformation query. It sends no request when
+// fi.FileAttributes does not include FILE_ATTRIBUTE_REPARSE_POINT.
+//
+// If the server returns an error status for the query, fillReparseTag leaves
+// fi.ReparsePointTag unchanged and returns nil. It returns any other error,
+// such as a failed connection.
+func (f *File) fillReparseTag(fi *FileStat) error {
+	if fi.FileAttributes&smb2.FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+		return nil
+	}
+
+	req := &smb2.QueryInfoRequest{
+		InfoType:              smb2.SMB2_0_INFO_FILE,
+		FileInfoClass:         smb2.FileAttributeTagInformation,
+		AdditionalInformation: 0,
+		Flags:                 0,
+		OutputBufferLength:    8,
+	}
+
+	infoBytes, err := f.queryInfo(req)
+	if err != nil {
+		// An error status means the server does not report the tag, for
+		// example because it does not support FileAttributeTagInformation.
+		// The other fields of fi are still valid, so the error is dropped.
+		// accept converts STATUS_ACCESS_DENIED to os.ErrPermission instead of
+		// a *ResponseError.
+		if _, ok := err.(*ResponseError); ok || os.IsPermission(err) {
+			return nil
+		}
+		return err
+	}
+
+	info := smb2.FileAttributeTagInformationDecoder(infoBytes)
+	if info.IsInvalid() {
+		return &InvalidResponseError{"broken query info response format"}
+	}
+
+	fi.ReparsePointTag = ReparseTag(info.ReparseTag())
+
+	return nil
 }
 
 func (f *File) Statfs() (FileFsInfo, error) {
@@ -2166,7 +2227,7 @@ func (f *File) readdir(pattern string) (fi []os.FileInfo, err error) {
 				AllocationSize:  info.AllocationSize(),
 				FileAttributes:  info.FileAttributes(),
 				FileId:          info.FileId(),
-				ReparsePointTag: info.ReparsePointTag(),
+				ReparsePointTag: ReparseTag(info.ReparsePointTag()),
 				FileName:        name,
 			})
 		}
@@ -2325,9 +2386,15 @@ type FileStat struct {
 	// non-native backends do.
 	FileId uint64
 
-	// ReparsePointTag is the tag that identifies the file system filter
-	// associated with the data when the file is a reparse point. Otherwise, 0.
-	ReparsePointTag uint32
+	// ReparsePointTag is the reparse tag of the file when FileAttributes
+	// includes FILE_ATTRIBUTE_REPARSE_POINT, and 0 otherwise.
+	//
+	// File.Readdir and File.ReaddirPlus read the tag from the directory
+	// listing, without an additional request. For a reparse point,
+	// Share.Stat, Share.Lstat and File.Stat send an additional QUERY_INFO
+	// request for the tag. If the server returns an error status for that
+	// request, ReparsePointTag is 0 and the method does not return an error.
+	ReparsePointTag ReparseTag
 
 	FileName string
 }
@@ -2340,12 +2407,10 @@ func (fs *FileStat) Size() int64 {
 	return fs.EndOfFile
 }
 
+// Mode returns the file mode bits derived from FileAttributes and
+// ReparsePointTag.
 func (fs *FileStat) Mode() os.FileMode {
 	var m os.FileMode
-
-	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_DIRECTORY != 0 {
-		m |= os.ModeDir | 0o111
-	}
 
 	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_READONLY != 0 {
 		m |= 0o444
@@ -2353,8 +2418,40 @@ func (fs *FileStat) Mode() os.FileMode {
 		m |= 0o666
 	}
 
+	isDir := fs.FileAttributes&smb2.FILE_ATTRIBUTE_DIRECTORY != 0
+
+	// for reparse points, the type bits depend on the tag.
+	// Only IOReparseTagSymlink sets ModeSymlink, because Readlink reads only that tag
+	// and Share.Stat follows only links with that tag. WSL sockets, FIFOs and
+	// device files have ModeSocket, ModeNamedPipe and ModeDevice. Other name
+	// surrogates, such as junctions, and reparse points whose tag is 0 because
+	// the server did not report it, have ModeIrregular. None of these have
+	// ModeDir, so code that walks a tree does not descend through them. Reparse
+	// points with any other tag, such as deduplicated, Cloud Files and Azure File
+	// Sync files and directories, have the mode of a regular file or directory.
 	if fs.FileAttributes&smb2.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		m |= os.ModeSymlink
+		tag := fs.ReparsePointTag
+		// IOReparseTagSymlink is also a name surrogate, so it is matched first.
+		switch {
+		case tag == IOReparseTagSymlink:
+			m |= os.ModeSymlink
+			isDir = false
+		case tag == IOReparseTagAFUnix:
+			m |= os.ModeSocket
+		case tag == IOReparseTagLxFIFO:
+			m |= os.ModeNamedPipe
+		case tag == IOReparseTagLxChr:
+			m |= os.ModeDevice | os.ModeCharDevice
+		case tag == IOReparseTagLxBlk:
+			m |= os.ModeDevice
+		case tag == 0, tag.IsNameSurrogate():
+			m |= os.ModeIrregular
+			isDir = false
+		}
+	}
+
+	if isDir {
+		m |= os.ModeDir | 0o111
 	}
 
 	return m
