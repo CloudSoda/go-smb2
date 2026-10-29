@@ -1128,7 +1128,11 @@ func evalSymlinkError(name string, errData []byte, mc utf16le.MapChars) (string,
 		return target + u, nil
 	}
 
-	return dir(ud) + target + u, nil
+	// A relative target is relative to the directory that holds the link.
+	// split keeps that directory's trailing separator, which dir drops.
+	linkDir, _ := split(ud)
+
+	return linkDir + target + u, nil
 }
 
 func (fs *Share) sendRecv(cmd uint16, req smb2.Packet) (res []byte, err error) {

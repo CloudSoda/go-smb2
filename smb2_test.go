@@ -174,7 +174,7 @@ func TestSFMMount(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestSFMMount", os.Getpid())
-	err := sfmFS.Mkdir(testDir, 0755)
+	err := sfmFS.Mkdir(testDir, 0o755)
 	require.NoError(t, err)
 	defer func() {
 		_ = sfmFS.RemoveAll(testDir)
@@ -187,7 +187,7 @@ func TestSFMMount(t *testing.T) {
 		for _, rc := range reservedChars {
 			data := []byte("bytes in the file" + rc)
 			name := "file-" + rc
-			err := sfmFS.WriteFile(join(testDir, name), data, 0644)
+			err := sfmFS.WriteFile(join(testDir, name), data, 0o644)
 			require.NoError(t, err)
 
 			// read it back
@@ -202,7 +202,7 @@ func TestSFMMount(t *testing.T) {
 		for _, rc := range reservedChars {
 			name := "dir-" + rc
 			// create the oddly named directory with a sub directory
-			err := sfmFS.MkdirAll(join(testDir, name, "subdir"), 0755)
+			err := sfmFS.MkdirAll(join(testDir, name, "subdir"), 0o755)
 			require.NoError(t, err)
 
 			// list the contents of the oddly naed directory
@@ -224,7 +224,7 @@ func TestSFUMount(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestSFUMount", os.Getpid())
-	err := sfuFS.Mkdir(testDir, 0755)
+	err := sfuFS.Mkdir(testDir, 0o755)
 	require.NoError(t, err)
 	defer func() {
 		_ = sfuFS.RemoveAll(testDir)
@@ -237,7 +237,7 @@ func TestSFUMount(t *testing.T) {
 		for _, rc := range reservedChars {
 			data := []byte("bytes in the file" + rc)
 			name := "file-" + rc
-			err := sfuFS.WriteFile(join(testDir, name), data, 0644)
+			err := sfuFS.WriteFile(join(testDir, name), data, 0o644)
 			require.NoError(t, err)
 
 			// read it back
@@ -252,7 +252,7 @@ func TestSFUMount(t *testing.T) {
 		for _, rc := range reservedChars {
 			name := "dir-" + rc
 			// create the oddly named directory with a sub directory
-			err := sfuFS.MkdirAll(join(testDir, name, "subdir"), 0755)
+			err := sfuFS.MkdirAll(join(testDir, name, "subdir"), 0o755)
 			require.NoError(t, err)
 
 			// list the contents of the oddly naed directory
@@ -273,7 +273,7 @@ func TestReaddir(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestReaddir", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestFile(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestFile", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestSymlink(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestSymlink", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,7 @@ func TestIsXXX(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestIsXXX", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestIsXXX(t *testing.T) {
 		_ = fs.Remove(testDir + `\Exist`)
 	}()
 
-	_, err = fs.OpenFile(testDir+`\Exist`, os.O_CREATE|os.O_EXCL, 0666)
+	_, err = fs.OpenFile(testDir+`\Exist`, os.O_CREATE|os.O_EXCL, 0o666)
 	if !os.IsExist(err) {
 		t.Error("unexpected error:", err)
 	}
@@ -557,11 +557,11 @@ func TestIsXXX(t *testing.T) {
 		t.Error("unexpected error:", err)
 	}
 
-	err = fs.WriteFile(testDir+`\aaa`, []byte("aaa"), 0444)
+	err = fs.WriteFile(testDir+`\aaa`, []byte("aaa"), 0o444)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fs.WriteFile(testDir+`\aaa`, []byte("aaa"), 0444)
+	err = fs.WriteFile(testDir+`\aaa`, []byte("aaa"), 0o444)
 	if !os.IsPermission(err) {
 		t.Error("unexpected error:", err)
 	}
@@ -591,7 +591,7 @@ func TestRename(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestRename", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	require.NoError(t, err)
 	defer func() {
 		_ = fs.RemoveAll(testDir)
@@ -624,10 +624,10 @@ func TestRename(t *testing.T) {
 		data := []byte("the final data")
 		oldName := ".sourceFile"
 		newName := "destinationFile"
-		err := fs.WriteFile(join(testDir, oldName), data, 0644)
+		err := fs.WriteFile(join(testDir, oldName), data, 0o644)
 		require.NoError(t, err)
 
-		err = fs.WriteFile(join(testDir, newName), []byte("doesn't matter"), 0644)
+		err = fs.WriteFile(join(testDir, newName), []byte("doesn't matter"), 0o644)
 		require.NoError(t, err)
 
 		err = fs.Rename(join(testDir, oldName), join(testDir, newName))
@@ -649,7 +649,7 @@ func TestChtimes(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestChtimes", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +696,7 @@ func TestChmod(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestChmod", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,10 +717,10 @@ func TestChmod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stat.Mode() != 0666 {
+	if stat.Mode() != 0o666 {
 		t.Error("unexpected mode:", stat.Mode())
 	}
-	err = f.Chmod(0444)
+	err = f.Chmod(0o444)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func TestChmod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stat.Mode() != 0444 {
+	if stat.Mode() != 0o444 {
 		t.Error("unexpected mode:", stat.Mode())
 	}
 }
@@ -796,7 +796,7 @@ func TestServerSideCopy(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestServerSideCopy", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +804,7 @@ func TestServerSideCopy(t *testing.T) {
 		_ = fs.RemoveAll(testDir)
 	}()
 
-	err = fs.WriteFile(join(testDir, "src.txt"), []byte("hello world!"), 0666)
+	err = fs.WriteFile(join(testDir, "src.txt"), []byte("hello world!"), 0o666)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,19 +841,19 @@ func TestRemoveAll(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestRemoveAll", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fs.WriteFile(join(testDir, "hello.txt"), []byte("hello world!"), 0666)
+	err = fs.WriteFile(join(testDir, "hello.txt"), []byte("hello world!"), 0o666)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fs.Mkdir(join(testDir, "hello"), 0755)
+	err = fs.Mkdir(join(testDir, "hello"), 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fs.WriteFile(join(testDir, "hello", "hello.txt"), []byte("hello world!"), 0444)
+	err = fs.WriteFile(join(testDir, "hello", "hello.txt"), []byte("hello world!"), 0o444)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +869,7 @@ func TestGlob(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestGlob", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -879,13 +879,13 @@ func TestGlob(t *testing.T) {
 
 	for _, dir := range []string{"", "dir1", "dir2", "dir3"} {
 		if dir != "" {
-			err = fs.Mkdir(join(testDir, dir), 0755)
+			err = fs.Mkdir(join(testDir, dir), 0o755)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 		for _, file := range []string{"abc.ext", "ab1.ext", "ab9.ext", "test", "tes"} {
-			err = fs.WriteFile(join(testDir, dir, file), []byte("hello world!"), 0666)
+			err = fs.WriteFile(join(testDir, dir, file), []byte("hello world!"), 0o666)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -956,7 +956,7 @@ func TestSecurityDescriptor(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestFile", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -997,7 +997,7 @@ func TestReaddirReparsePointTag(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestReaddirReparsePointTag", os.Getpid())
-	require.NoError(t, fs.Mkdir(testDir, 0755))
+	require.NoError(t, fs.Mkdir(testDir, 0o755))
 	defer func() {
 		_ = fs.RemoveAll(testDir)
 	}()
@@ -1039,7 +1039,7 @@ func TestStatReparsePointTag(t *testing.T) {
 	}
 
 	testDir := fmt.Sprintf("testDir-%d-TestStatReparsePointTag", os.Getpid())
-	require.NoError(t, fs.Mkdir(testDir, 0755))
+	require.NoError(t, fs.Mkdir(testDir, 0o755))
 	defer func() {
 		_ = fs.RemoveAll(testDir)
 	}()
@@ -1048,7 +1048,7 @@ func TestStatReparsePointTag(t *testing.T) {
 	require.NoError(t, err)
 	f.Close()
 
-	if err := fs.Symlink(testDir+`\plainFile`, testDir+`\linkToPlainFile`); err != nil {
+	if err := fs.Symlink(`plainFile`, testDir+`\linkToPlainFile`); err != nil {
 		t.Skip("server doesn't support reparse point:", err)
 	}
 
@@ -1070,7 +1070,7 @@ func TestReaddirPlus(t *testing.T) {
 		t.Skip()
 	}
 	testDir := fmt.Sprintf("testDir-%d-TestReaddirPlus", os.Getpid())
-	err := fs.Mkdir(testDir, 0755)
+	err := fs.Mkdir(testDir, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1199,7 +1199,7 @@ func TestReaddirPlus(t *testing.T) {
 
 	t.Run("empty_directory", func(t *testing.T) {
 		emptyDir := testDir + `\empty`
-		err := fs.Mkdir(emptyDir, 0755)
+		err := fs.Mkdir(emptyDir, 0o755)
 		if err != nil {
 			t.Fatal(err)
 		}
