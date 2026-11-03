@@ -275,6 +275,8 @@ func TestFileStatMode(t *testing.T) {
 		{"LxFIFO", reparse, IOReparseTagLxFIFO, os.ModeNamedPipe | 0o666},
 		{"LxChr", reparse, IOReparseTagLxChr, os.ModeDevice | os.ModeCharDevice | 0o666},
 		{"LxBlk", reparse, IOReparseTagLxBlk, os.ModeDevice | 0o666},
+		{"AppExecLink", reparse, IOReparseTagAppExecLink, os.ModeIrregular | 0o666},
+		{"NFS", reparse, IOReparseTagNFS, os.ModeIrregular | 0o666},
 	}
 
 	for _, td := range testData {
