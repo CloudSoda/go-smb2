@@ -109,9 +109,8 @@ retry:
 		return nil, err
 	}
 
-	req.CreditCharge = 1
-
-	rr, err := conn.send(ctx, req)
+	// Spends the account's initial credit.
+	rr, err := conn.sendCharged(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -404,11 +403,22 @@ func (conn *conn) mustSignAny(sessionFlags uint16, entries []compoundEntry) bool
 	return false
 }
 
-// send transmits a control request that did not borrow credits from the account
-// (negotiate, session setup, tree connect, echo, ...). borrowed is 0, so a
-// failure refunds nothing.
+// send transmits a request without borrowing credits. Only for logoff, which
+// must not block on credits during teardown.
 func (conn *conn) send(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
 	return conn.sendWith(ctx, req, nil, 0)
+}
+
+// sendCharged borrows the one credit a control request costs, then sends it.
+func (conn *conn) sendCharged(ctx context.Context, req smb2.Packet) (rr *requestResponse, err error) {
+	creditCharge, _, err := conn.borrowCredits(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header().CreditCharge = creditCharge
+
+	return conn.sendWith(ctx, req, nil, creditCharge)
 }
 
 // sendWith transmits req. borrowed is the number of credits drawn from the
