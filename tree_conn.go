@@ -203,9 +203,7 @@ func treeConnect(ctx context.Context, s *session, path string, flags uint16, mc 
 		Mapping: mc,
 	}
 
-	req.CreditCharge = 1
-
-	rr, err := s.send(ctx, req)
+	rr, err := s.sendCharged(ctx, req)
 	if err != nil {
 		return nil, err
 	}

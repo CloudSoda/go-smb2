@@ -40,10 +40,15 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 		req.SecurityMode = smb2.SMB2_NEGOTIATE_SIGNING_ENABLED
 	}
 
-	req.CreditCharge = 1
+	// Borrow first: initRequest() asks for the gap between pool and balance.
+	req.CreditCharge, _, err = conn.borrowCredits(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+
 	req.CreditRequestResponse = conn.account.initRequest()
 
-	rr, err := conn.send(ctx, req)
+	rr, err := conn.sendWith(ctx, req, nil, req.CreditCharge)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +126,7 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 
 		req.CreditRequestResponse = 0
 
-		rr, err = s.send(ctx, req)
+		rr, err = s.sendCharged(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -301,9 +306,17 @@ func (s *session) logoff(ctx context.Context) error {
 func (s *session) echo(ctx context.Context) error {
 	req := new(smb2.EchoRequest)
 
-	req.CreditCharge = 1
+	rr, err := s.sendCharged(ctx, req)
+	if err != nil {
+		return err
+	}
 
-	res, err := s.sendRecv(ctx, smb2.SMB2_ECHO, req)
+	pkt, err := s.recv(rr)
+	if err != nil {
+		return err
+	}
+
+	res, err := accept(smb2.SMB2_ECHO, pkt)
 	if err != nil {
 		return err
 	}
