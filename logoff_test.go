@@ -137,3 +137,56 @@ func TestLogoffTwiceDoesNotBlock(t *testing.T) {
 
 	require.Equal(3, dt.closeCount())
 }
+
+// A request issued after a logoff has torn the connection down must return,
+// not hang.
+//
+// logoff signals rdone before closing the transport, so the receiver treats
+// the read failure as an expected shutdown and clears the error:
+//
+//	case <-conn.rdone:
+//	    err = nil
+//	...
+//	conn.err = err
+//
+// That leaves conn.err nil, so the guard in makeRequestResponse does not fire
+// for the next request. Meanwhile the receiver has closed wdone and released
+// the sender, so conn.write has no reader. The send still succeeds once
+// because the channel is buffered, and what follows is a wait on conn.werr
+// that nothing will ever answer — with a context that is never cancelled,
+// which is what Logoff passes.
+//
+// TestLogoffTwiceDoesNotBlock covers the same defect but races the teardown,
+// so it usually passes and occasionally hits its five second timeout.
+func TestSendAfterTeardownDoesNotBlock(t *testing.T) {
+	require := require.New(t)
+
+	dt := newDeadTransport()
+	c := newTestConn(dt)
+	s := &session{conn: c}
+
+	// A real logoff, so the receiver exits by the expected path and records a
+	// nil connection error.
+	_ = s.logoff(context.Background())
+	<-c.wdone
+
+	// Give the sender the moment it needs to observe wdone and return, so the
+	// request below genuinely has no reader rather than racing for one.
+	time.Sleep(50 * time.Millisecond)
+
+	// The shutdown was the expected one, so the requests in flight were told
+	// nothing was wrong. The connection is still closed, and must say so.
+	require.Error(c.err, "a closed connection must report itself closed")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.logoff(context.Background())
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(err, "a request on a torn-down connection must report one")
+	case <-time.After(2 * time.Second):
+		t.Fatal("request on a torn-down connection blocked")
+	}
+}
