@@ -253,6 +253,25 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 
 	s.sessionFlags = r.SessionFlags()
 
+	// SESSION_SETUP exchanges always travel at the SMB transport level WITHOUT
+	// encryption, even when RequireMessageEncryption is set. This is by
+	// design: the session key — from which all encryption and signing keys are
+	// derived — does not exist until this final response is received.
+	//
+	// Credential security therefore relies entirely on the authentication
+	// sub-protocol:
+	//   - NTLMv2: the password is never transmitted; only an HMAC-MD5 of the
+	//     NT hash keyed with the server challenge and a client nonce is sent.
+	//   - Kerberos: the service ticket is encrypted by the KDC; plaintext
+	//     credentials never appear on the wire.
+	//
+	// The check below ensures that all subsequent messages (TREE_CONNECT,
+	// READ, WRITE, ...) will be SMB-encrypted by aborting the connection if
+	// the server did not activate session-wide encryption.
+	if s.requireEncryption && s.sessionFlags&smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA == 0 {
+		return nil, &InvalidResponseError{"encryption required but server did not set SMB2_SESSION_FLAG_ENCRYPT_DATA"}
+	}
+
 	// now, allow access from receiver
 	s.useSession.Store(true)
 
