@@ -1,12 +1,10 @@
 package smb2
 
 import (
-	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
-
 	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
@@ -104,7 +102,6 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 				h.Sum(s.preauthIntegrityHashValue[:0])
 			}
 		}
-
 	}
 
 	outputToken, err = spnego.AcceptSecContext(r.SecurityBuffer())
@@ -378,7 +375,7 @@ func (s *session) verify(pkt []byte) (ok bool) {
 
 	p.SetSignature(h.Sum(nil))
 
-	return bytes.Equal(signature, p.Signature())
+	return hmac.Equal(signature, p.Signature())
 }
 
 // encrypt encrypts pkt into c. len(c) must equal 52+len(pkt)+16.
@@ -408,6 +405,18 @@ func (s *session) encrypt(pkt, c []byte) ([]byte, error) {
 // ciphertext and tag into c and decrypts in-place.
 func (s *session) decrypt(pkt, c []byte) ([]byte, error) {
 	t := smb2.TransformCodec(pkt)
+
+	// MS-SMB2 §3.3.5.2.7: OriginalMessageSize must equal the plaintext
+	// length (ciphertext minus AEAD tag).
+	overhead := s.decrypter.Overhead()
+	encLen := len(t.EncryptedData())
+	if encLen < overhead {
+		return nil, &InvalidResponseError{"transform header: encrypted payload too short"}
+	}
+	expectedPlainLen := encLen - overhead
+	if uint32(expectedPlainLen) != t.OriginalMessageSize() {
+		return nil, &InvalidResponseError{"transform header: OriginalMessageSize mismatch"}
+	}
 
 	c = c[:0]
 	c = append(c, t.EncryptedData()...)
