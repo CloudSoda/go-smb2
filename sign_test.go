@@ -26,7 +26,7 @@ func TestSign(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	signingKey := kdf(sessionKey, []byte("SMB2AESCMAC\x00"), []byte("SmbSign\x00"))
+	signingKey := kdf(sessionKey, []byte("SMB2AESCMAC\x00"), []byte("SmbSign\x00"), 16)
 	ciph, err := aes.NewCipher(signingKey)
 	if err != nil {
 		t.Fatal(err)
