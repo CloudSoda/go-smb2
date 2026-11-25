@@ -34,6 +34,7 @@ package cmac
 
 import (
 	"crypto/cipher"
+	"crypto/subtle"
 	"hash"
 )
 
@@ -93,18 +94,27 @@ func (d *cmac) Reset() {
 }
 
 // Write adds the given data to the digest state.
+//
+// BackupZit: a block at a time instead of a byte at a time. As before, a
+// full block stays in ci unencrypted until more data follows, since Sum
+// treats the last block differently.
 func (d *cmac) Write(p []byte) (n int, err error) {
-	// Xor input into ci.
-	for _, c := range p {
-		// If ci is full, encrypt and start over.
-		if d.p >= len(d.ci) {
-			d.c.Encrypt(d.ci, d.ci)
-			d.p = 0
-		}
-		d.ci[d.p] ^= c
-		d.p++
+	n = len(p)
+	bs := len(d.ci)
+
+	// Xor input into what is left of ci.
+	if d.p < bs {
+		k := subtle.XORBytes(d.ci[d.p:], d.ci[d.p:], p)
+		d.p += k
+		p = p[k:]
 	}
-	return len(p), nil
+	// ci is full: encrypt it and start over with the next block.
+	for len(p) > 0 {
+		d.c.Encrypt(d.ci, d.ci)
+		d.p = subtle.XORBytes(d.ci, d.ci, p)
+		p = p[d.p:]
+	}
+	return n, nil
 }
 
 // Sum returns the CMAC digest, one cipher block in length,
