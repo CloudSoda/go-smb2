@@ -34,6 +34,9 @@ type latencyServer struct {
 
 	// fail, if set, returns an NTSTATUS to answer the request with instead.
 	fail func(cmd uint16, off uint64) erref.NtStatus
+	// short, if set, returns how many of the n bytes of a WRITE at off the
+	// server writes (and reports).
+	short func(off uint64, n uint32) uint32
 
 	mu   sync.Mutex
 	data []byte
@@ -122,13 +125,16 @@ func (s *latencyServer) respond(pkt []byte) []byte {
 			break
 		}
 		data := pkt[w.DataOffset() : uint32(w.DataOffset())+w.Length()]
+		if s.short != nil {
+			data = data[:s.short(w.Offset(), w.Length())]
+		}
 		s.mu.Lock()
 		if end := int(w.Offset()) + len(data); end > len(s.data) {
 			s.data = append(s.data, make([]byte, end-len(s.data))...)
 		}
 		copy(s.data[w.Offset():], data)
 		s.mu.Unlock()
-		res = &smb2.WriteResponse{PacketHeader: hdr, Count: w.Length()}
+		res = &smb2.WriteResponse{PacketHeader: hdr, Count: uint32(len(data))}
 	default:
 		res = s.errorResponse(hdr, erref.STATUS_NOT_SUPPORTED)
 	}
@@ -335,6 +341,42 @@ func TestWriteAtSeveralChunks(t *testing.T) {
 	}
 	if got := srv.snapshot(); !bytes.Equal(got, want) {
 		t.Fatalf("server holds %d bytes, not the %d written", len(got), len(want))
+	}
+	if v := srv.maxInflight.Load(); v < 2 {
+		t.Errorf("at most %d WRITE requests in flight, want several", v)
+	}
+}
+
+func TestWriteAtShortWrite(t *testing.T) {
+	const mib = 1 << 20
+	f, srv := newLatencyFile(t, time.Millisecond, nil, nil)
+	var once sync.Once
+	srv.short = func(off uint64, n uint32) uint32 {
+		if off == mib {
+			short := n
+			once.Do(func() { short = 1000 })
+			return short
+		}
+		return n
+	}
+
+	// The chunk at 1 MiB is written short once: writeAt sends the rest of
+	// it and the chunks after it again.
+	p := pattern(5*mib + 3)
+	if n, err := f.WriteAt(p, 0); err != nil || n != len(p) {
+		t.Fatalf("WriteAt = %d, %v", n, err)
+	}
+	if !bytes.Equal(srv.snapshot(), p) {
+		t.Fatal("wrong data")
+	}
+	if r := srv.requests.Load(); r <= 6 {
+		t.Errorf("%d WRITE requests, want the short chunk and the ones after it again", r)
+	}
+
+	// A server that writes nothing: an error, not an endless loop.
+	srv.short = func(uint64, uint32) uint32 { return 0 }
+	if _, err := f.WriteAt(p, 0); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("WriteAt with nothing written = %v, want ErrShortWrite", err)
 	}
 }
 
