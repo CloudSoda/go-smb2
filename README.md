@@ -9,6 +9,13 @@ Description
 
 An SMB2/3 client implementation. This is a fork of the project [github.com/hirochachacha/go-smb2](https://github.com/hirochachacha/go-smb2). Any releases will be pre-1.0.0 for some time as features and bug fixes are implemented.
 
+Set `Negotiator.RequireEncryption` to make the session encrypted-only: every
+request after session setup is sent encrypted (the server need not ask for it),
+an unencrypted response is refused, and `Dial` fails with
+`ErrEncryptionRequired` when the server cannot encrypt (dialect below 3.0, no
+encryption capability, no cipher in 3.1.1, guest or anonymous session).
+`Session.Encrypted()` and `Share.Encrypted()` report the state in use.
+
 Installation
 ------------
 
