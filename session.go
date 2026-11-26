@@ -253,10 +253,7 @@ func sessionSetup(ctx context.Context, conn *conn, i Initiator) (*session, error
 
 	s.sessionFlags = r.SessionFlags()
 
-	// now, allow access from receiver
-	s.useSession.Store(true)
-
-	return s, nil
+	return s.admit()
 }
 
 type session struct {
