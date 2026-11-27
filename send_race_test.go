@@ -111,6 +111,12 @@ func TestSendWaitingOnAbandonedWriteRefundsOnContextEnd(t *testing.T) {
 				t.Fatalf("borrow: %d, %v", borrowed, err)
 			}
 			c.abandonedWrites = 1
+			if c.write == nil {
+				c.write = make(chan []byte, 1)
+			}
+			if c.werr == nil {
+				c.werr = make(chan error, 1)
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
