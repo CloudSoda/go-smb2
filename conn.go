@@ -337,6 +337,13 @@ type conn struct {
 
 	m sync.Mutex
 
+	// abandonedWrites counts packets handed to runSender whose caller gave up
+	// (context done) before the write result came back. runSender is still
+	// reading the shared encode/encrypt buffers for such a packet, and its
+	// pending result sits in werr; both must be settled before the next send
+	// reuses the buffers or reads werr. Guarded by m.
+	abandonedWrites int
+
 	err error
 
 	// gssNegotiateToken []byte
@@ -433,6 +440,11 @@ func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn, b
 		// do nothing
 	}
 
+	if err := conn.settleAbandonedWrites(ctx); err != nil {
+		conn.refundCredits(borrowed)
+		return nil, err
+	}
+
 	rr, err = conn.makeRequestResponse(ctx, req, tc, borrowed)
 	if err != nil {
 		conn.refundCredits(borrowed)
@@ -451,6 +463,8 @@ func (conn *conn) sendWith(ctx context.Context, req smb2.Packet, tc *treeConn, b
 				return nil, &TransportError{err}
 			}
 		case <-ctx.Done():
+			conn.abandonedWrites++
+
 			if _, ok := conn.outstandingRequests.pop(rr.msgId); ok {
 				conn.refundCredits(rr.claimLoan())
 			}
@@ -510,6 +524,11 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 		conn.refundCredits(totalBorrowed)
 		return nil, ctx.Err()
 	default:
+	}
+
+	if err := conn.settleAbandonedWrites(ctx); err != nil {
+		conn.refundCredits(totalBorrowed)
+		return nil, err
 	}
 
 	n := len(entries)
@@ -669,6 +688,7 @@ func (conn *conn) sendCompound(ctx context.Context, entries []compoundEntry) ([]
 				return nil, &TransportError{err}
 			}
 		case <-ctx.Done():
+			conn.abandonedWrites++
 			conn.refundCompound(rrs)
 			return nil, ctx.Err()
 		}
@@ -801,6 +821,25 @@ func (conn *conn) recv(rr *requestResponse) ([]byte, error) {
 
 		return nil, rr.ctx.Err()
 	}
+}
+
+// settleAbandonedWrites waits until runSender has finished every packet whose
+// sender gave up on it, consuming the results those writes left in werr.
+// Until then runSender may still be reading encodeBuf / session.encryptBuf, and
+// a stale werr would be taken for the next write's result, ending that send
+// early with the buffers still in use. Caller holds conn.m. Returns ctx's error
+// if ctx ends first; the unsettled count is kept.
+func (conn *conn) settleAbandonedWrites(ctx context.Context) error {
+	for conn.abandonedWrites > 0 {
+		select {
+		case <-conn.werr:
+			conn.abandonedWrites--
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return nil
 }
 
 func (conn *conn) runSender() {
