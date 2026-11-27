@@ -1299,6 +1299,40 @@ func (f *File) maxTransactSize() int {
 	return size
 }
 
+// pipelineDepth is how many READ or WRITE requests of one readAt or writeAt
+// are in flight at once. One 1 MiB request costs 16 credits, so four take
+// half of clientMaxCreditBalance; with fewer credits borrowCredits shrinks
+// or delays the later requests. (BackupZit: upstream sends one request and
+// waits for its response before the next, a round trip per chunk.)
+const pipelineDepth = 4
+
+// chunk is a READ or WRITE request of readAt or writeAt in flight.
+type chunk struct {
+	rr  *requestResponse
+	pos int // position in the caller's buffer
+	m   int // bytes requested
+}
+
+// chunkQueue holds the requests in flight in the order they were sent.
+type chunkQueue struct {
+	q    [pipelineDepth]chunk
+	head int
+	len  int
+}
+
+func (q *chunkQueue) push(c chunk) {
+	q.q[(q.head+q.len)%pipelineDepth] = c
+	q.len++
+}
+
+func (q *chunkQueue) pop() chunk {
+	c := q.q[q.head]
+	q.q[q.head] = chunk{}
+	q.head = (q.head + 1) % pipelineDepth
+	q.len--
+	return c
+}
+
 func (f *File) readAt(b []byte, off int64) (n int, err error) {
 	if off < 0 {
 		return 0, os.ErrInvalid
@@ -1306,48 +1340,61 @@ func (f *File) readAt(b []byte, off int64) (n int, err error) {
 
 	maxReadSize := f.maxReadSize()
 
+	// Up to pipelineDepth READ requests are in flight; their responses are
+	// taken in order, each copied to its place in b. A response that is
+	// short or reports the end of the file, or an error, stops sending; the
+	// requests still in flight are drained (their responses settle credits
+	// and free receive buffers) before readAt returns.
+	var q chunkQueue
+	sent := 0     // bytes of b requested so far
+	stop := false // send no more requests
 	for {
+		for !stop && q.len < pipelineDepth && sent < len(b) {
+			rr, m, e := f.sendReadChunk(min(len(b)-sent, maxReadSize), int64(sent)+off)
+			if e != nil {
+				err = e
+				stop = true
+				break
+			}
+			q.push(chunk{rr: rr, pos: sent, m: m})
+			sent += m
+		}
+		if q.len == 0 {
+			break
+		}
+
+		c := q.pop()
+		bs, isEOF, e := f.recvReadChunk(c.rr, c.m)
 		switch {
-		case len(b)-n == 0:
-			return n, nil
-		case len(b)-n <= maxReadSize:
-			bs, isEOF, rr, err := f.readAtChunk(len(b)-n, int64(n)+off)
-			if err != nil {
-				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
-					return n, nil
-				}
-				return 0, err
-			}
-
-			n += copy(b[n:], bs)
-			rr.freeRecvBuf()
-
-			if isEOF {
-				return n, nil
-			}
+		case stop:
+			// Draining after an error or after the end of the file.
+		case e != nil:
+			err = e
+			stop = true
 		default:
-			bs, isEOF, rr, err := f.readAtChunk(maxReadSize, int64(n)+off)
-			if err != nil {
-				if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
-					return n, nil
-				}
-				return 0, err
-			}
-
-			n += copy(b[n:], bs)
-			rr.freeRecvBuf()
-
+			n = c.pos + copy(b[c.pos:c.pos+c.m], bs)
 			if isEOF {
-				return n, nil
+				stop = true
 			}
 		}
+		c.rr.freeRecvBuf()
 	}
+
+	if err != nil {
+		if err, ok := err.(*ResponseError); ok && erref.NtStatus(err.Code) == erref.STATUS_END_OF_FILE && n != 0 {
+			return n, nil
+		}
+		return 0, err
+	}
+	return n, nil
 }
 
-func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, rr *requestResponse, err error) {
+// sendReadChunk sends a READ request for up to n bytes at off; m is the
+// number of bytes requested, fewer than n if the credits did not suffice.
+func (f *File) sendReadChunk(n int, off int64) (rr *requestResponse, m int, err error) {
 	creditCharge, m, err := f.fs.borrowCredits(n)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, 0, err
 	}
 
 	req := &smb2.ReadRequest{
@@ -1367,29 +1414,32 @@ func (f *File) readAtChunk(n int, off int64) (bs []byte, isEOF bool, rr *request
 
 	rr, err = f.fs.send(f.fs.ctx, req)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, 0, err
 	}
+	return rr, m, nil
+}
 
+// recvReadChunk waits for the response to a READ request for m bytes. bs
+// lies in the receive buffer of rr until rr.freeRecvBuf.
+func (f *File) recvReadChunk(rr *requestResponse, m int) (bs []byte, isEOF bool, err error) {
 	pkt, err := f.fs.recv(rr)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, err
 	}
 
 	res, err := accept(smb2.SMB2_READ, pkt)
 	if err != nil {
-		rr.freeRecvBuf()
-		return nil, false, nil, err
+		return nil, false, err
 	}
 
 	r := smb2.ReadResponseDecoder(res)
 	if r.IsInvalid() {
-		rr.freeRecvBuf()
-		return nil, false, nil, &InvalidResponseError{"broken read response format"}
+		return nil, false, &InvalidResponseError{"broken read response format"}
 	}
 
 	bs = r.Data()
 
-	return bs, len(bs) < m, rr, nil
+	return bs, len(bs) < m, nil
 }
 
 func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
@@ -1890,33 +1940,69 @@ func (f *File) writeAt(b []byte, off int64) (n int, err error) {
 
 	maxWriteSize := f.maxWriteSize()
 
+	// Up to pipelineDepth WRITE requests are in flight (see readAt); their
+	// responses are taken in order. An error stops sending. A response that
+	// wrote less than requested drains the requests in flight, and sending
+	// resumes after the bytes written: the later chunks are sent again.
+	var q chunkQueue
+	sent := 0       // bytes of b sent so far
+	stop := false   // send no more requests
+	resend := false // a short write: drain, then send again from n
 	for {
-		switch {
-		case len(b)-n == 0:
-			return n, nil
-		case len(b)-n <= maxWriteSize:
-			m, err := f.writeAtChunk(b[n:], int64(n)+off)
-			if err != nil {
-				return 0, err
+		for !stop && !resend && q.len < pipelineDepth && sent < len(b) {
+			rr, m, e := f.sendWriteChunk(b[sent:min(len(b), sent+maxWriteSize)], int64(sent)+off)
+			if e != nil {
+				err = e
+				stop = true
+				break
 			}
-
-			n += m
-		default:
-			m, err := f.writeAtChunk(b[n:n+maxWriteSize], int64(n)+off)
-			if err != nil {
-				return 0, err
-			}
-
-			n += m
+			q.push(chunk{rr: rr, pos: sent, m: m})
+			sent += m
 		}
-	}
-}
+		if q.len == 0 {
+			if !resend || stop {
+				break
+			}
+			resend = false
+			sent = n
+			continue
+		}
 
-// writeAt allows partial write
-func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
-	creditCharge, m, err := f.fs.borrowCredits(len(b))
+		c := q.pop()
+		count, e := f.recvWriteChunk(c.rr)
+		switch {
+		case stop || resend:
+			// Draining after an error or a short write.
+		case e != nil:
+			err = e
+			stop = true
+		case count > c.m:
+			err = &InvalidResponseError{"write response reports more bytes than requested"}
+			stop = true
+		case count == 0:
+			err = io.ErrShortWrite
+			stop = true
+		default:
+			n = c.pos + count
+			if count < c.m {
+				resend = true
+			}
+		}
+		c.rr.freeRecvBuf()
+	}
+
 	if err != nil {
 		return 0, err
+	}
+	return n, nil
+}
+
+// sendWriteChunk sends a WRITE request of b, or of its first m bytes if the
+// credits did not suffice for all of it.
+func (f *File) sendWriteChunk(b []byte, off int64) (rr *requestResponse, m int, err error) {
+	creditCharge, m, err := f.fs.borrowCredits(len(b))
+	if err != nil {
+		return nil, 0, err
 	}
 
 	req := &smb2.WriteRequest{
@@ -1932,7 +2018,23 @@ func (f *File) writeAtChunk(b []byte, off int64) (n int, err error) {
 
 	req.CreditCharge = creditCharge
 
-	res, err := f.sendRecv(smb2.SMB2_WRITE, req)
+	// The request is encoded (b copied) and written before send returns.
+	rr, err = f.fs.send(f.fs.ctx, req)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rr, m, nil
+}
+
+// recvWriteChunk waits for the response to a WRITE request and returns the
+// number of bytes the server wrote.
+func (f *File) recvWriteChunk(rr *requestResponse) (n int, err error) {
+	pkt, err := f.fs.recv(rr)
+	if err != nil {
+		return 0, err
+	}
+
+	res, err := accept(smb2.SMB2_WRITE, pkt)
 	if err != nil {
 		return 0, err
 	}
