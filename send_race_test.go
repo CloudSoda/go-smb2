@@ -88,3 +88,48 @@ func TestSendAbandonedMidWriteDoesNotShareBufferWithNextSend(t *testing.T) {
 		t.Fatalf("second send: %v", err)
 	}
 }
+
+// While an abandoned write is unsettled, a send whose own context ends gives
+// up without allocating a message ID or keeping its loan, and the abandoned
+// write stays counted until its result is consumed.
+func TestSendWaitingOnAbandonedWriteRefundsOnContextEnd(t *testing.T) {
+	for name, send := range map[string]func(c *conn, ctx context.Context) error{
+		"sendWith": func(c *conn, ctx context.Context) error {
+			_, err := c.sendWith(ctx, newReadReq(1), nil, 1)
+			return err
+		},
+		"sendCompound": func(c *conn, ctx context.Context) error {
+			_, err := c.sendCompound(ctx, []compoundEntry{{req: newReadReq(1)}})
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newRollbackConn()
+			borrowed, _, err := c.account.borrow(context.Background(), 1)
+			if err != nil || borrowed != 1 {
+				t.Fatalf("borrow: %d, %v", borrowed, err)
+			}
+			c.abandonedWrites = 1
+
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			if err := send(c, ctx); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("want DeadlineExceeded, got %v", err)
+			}
+			if got := len(c.account.balance); got != startBalance {
+				t.Fatalf("loan not refunded: balance %d, want %d", got, startBalance)
+			}
+			if c.sequenceWindow != 1 {
+				t.Fatalf("window moved to %d with nothing sent", c.sequenceWindow)
+			}
+			if c.abandonedWrites != 1 {
+				t.Fatalf("abandonedWrites = %d, want 1 until the result is consumed", c.abandonedWrites)
+			}
+
+			c.werr <- nil
+			if err := c.settleAbandonedWrites(context.Background()); err != nil || c.abandonedWrites != 0 {
+				t.Fatalf("settle: err %v, abandonedWrites %d", err, c.abandonedWrites)
+			}
+		})
+	}
+}
