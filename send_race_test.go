@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/cloudsoda/go-smb2/internal/smb2"
 )
 
 // gatedTransport blocks every Write until release is closed, then reads the
@@ -44,7 +46,6 @@ func TestSendAbandonedMidWriteDoesNotShareBufferWithNextSend(t *testing.T) {
 	gt := &gatedTransport{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	c.t = gt
 	c.wdone = make(chan struct{}, 1)
-	c.requireEncryption = true
 
 	blk, err := aes.NewCipher(make([]byte, 16))
 	if err != nil {
@@ -54,7 +55,7 @@ func TestSendAbandonedMidWriteDoesNotShareBufferWithNextSend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.session.Store(&session{conn: c, sessionId: 1, encrypter: gcm})
+	c.session.Store(&session{conn: c, sessionId: 1, encrypter: gcm, sessionFlags: smb2.SMB2_SESSION_FLAG_ENCRYPT_DATA})
 
 	go c.runSender()
 	t.Cleanup(func() { c.wdone <- struct{}{} })
